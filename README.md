@@ -1,8 +1,8 @@
-# ARI — Azure Resource Inventory
+# Azure Estate
 
-Ferramenta de linha de comando em Python que inventaria recursos do Azure via
-**Azure Resource Graph** e gera relatórios em **Excel** (assinaturas, grupos de
-recursos, tipos de recurso e detalhes de recursos).
+Ferramenta de linha de comando em Python que inventaria todo o *estate* de
+recursos do Azure via **Azure Resource Graph** e gera relatórios em **Excel**
+(assinaturas, grupos de recursos, tipos de recurso e detalhes de recursos).
 
 ## Funcionalidades
 
@@ -40,7 +40,7 @@ python main.py --list
 python main.py --report subscriptions
 
 # Diretório de saída customizado
-python main.py --report subscriptions --output /tmp/ari
+python main.py --report subscriptions --output /tmp/azure-estate
 ```
 
 ## Estrutura
