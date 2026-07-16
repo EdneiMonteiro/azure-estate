@@ -101,12 +101,19 @@ class _DirectAzureCliCredential:
         if tenant:
             cmd += ["--tenant", tenant]
 
+        # Cloud Shell's token broker can be slow for non-ARM audiences; allow a
+        # generous, overridable timeout.
+        try:
+            timeout = int(os.environ.get("ARI_AZ_TOKEN_TIMEOUT", "120"))
+        except ValueError:
+            timeout = 120
+
         try:
             completed = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=60,
+                timeout=timeout,
                 check=True,
             )
         except FileNotFoundError as exc:
@@ -115,7 +122,12 @@ class _DirectAzureCliCredential:
             ) from exc
         except subprocess.TimeoutExpired as exc:
             raise ClientAuthenticationError(
-                message="Timed out invoking the Azure CLI."
+                message=(
+                    f"Timed out ({timeout}s) invoking the Azure CLI for resource "
+                    f"'{resource}'. In Cloud Shell this usually means the token "
+                    "broker cannot mint a data-plane token for this audience "
+                    "(often a Conditional Access challenge)."
+                )
             ) from exc
         except subprocess.CalledProcessError as exc:
             raise ClientAuthenticationError(
