@@ -15,8 +15,28 @@ import pathlib
 from typing import Iterable
 
 from azure.core.exceptions import ClientAuthenticationError, ResourceExistsError
-from azure.identity import DefaultAzureCredential
+from azure.identity import (
+    AzureCliCredential,
+    AzurePowerShellCredential,
+    ChainedTokenCredential,
+)
 from azure.storage.fileshare import ShareClient, ShareDirectoryClient
+
+
+def _signed_in_user_credential() -> ChainedTokenCredential:
+    """Credential for the signed-in user (Azure CLI or Azure PowerShell).
+
+    A plain ``DefaultAzureCredential`` is deliberately avoided here: inside
+    Azure Cloud Shell it detects the managed-identity endpoint and blocks on
+    ``ManagedIdentityCredential`` ("Timeout waiting for token from portal"),
+    which aborts the chain before the already-signed-in CLI/PowerShell
+    identity is ever tried. Chaining those two directly uses the logged-in
+    user and works in Cloud Shell (bash and PowerShell) and local dev alike.
+    """
+    return ChainedTokenCredential(
+        AzureCliCredential(),
+        AzurePowerShellCredential(),
+    )
 
 
 class FileShareUploader:
@@ -33,9 +53,8 @@ class FileShareUploader:
         self._share_name = share_name
         # Normalize to forward slashes and strip leading/trailing separators.
         self._share_path = share_path.replace("\\", "/").strip("/")
-        # DefaultAzureCredential resolves the signed-in user via the Azure CLI,
-        # Azure PowerShell, environment variables or managed identity.
-        self._credential = credential or DefaultAzureCredential()
+        # Use the signed-in user's identity (CLI/PowerShell), not managed identity.
+        self._credential = credential or _signed_in_user_credential()
 
     # -- internal helpers ---------------------------------------------------
     def _share_client(self) -> ShareClient:
