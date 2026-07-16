@@ -70,7 +70,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def _upload_reports(args: argparse.Namespace) -> int:
     from ari.config import FILE_SHARE, SHARE_PATH, STORAGE_ACCOUNT
-    from ari.exporters.file_share import FileShareUploader
+
+    try:
+        from ari.exporters.file_share import FileShareUploader
+    except ModuleNotFoundError as exc:
+        print(
+            f"[ERROR] Missing dependency for --upload: {exc.name}.\n"
+            "       Install requirements first:  pip install -r requirements.txt\n"
+            '       (or: pip install "azure-storage-file-share>=12.16.0")'
+        )
+        return 1
 
     account = args.storage_account or STORAGE_ACCOUNT
     share = args.share or FILE_SHARE
