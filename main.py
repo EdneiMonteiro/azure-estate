@@ -100,8 +100,11 @@ def _upload_reports(args: argparse.Namespace) -> int:
     except ClientAuthenticationError as exc:
         print(f"[ERROR] Authentication failed: {exc}")
         print(
-            "       Sign in with the Azure CLI first:  az login\n"
-            "       (or Connect-AzAccount for Azure PowerShell)."
+            "       Could not acquire a token from the signed-in identity.\n"
+            "       - Local dev: run 'az login' (or Connect-AzAccount).\n"
+            "       - Azure Cloud Shell: ensure 'az account get-access-token' works;\n"
+            "         if 'az'/'pwsh' are reported as not invokable, verify they are on\n"
+            "         PATH (which az / which pwsh)."
         )
         return 1
     except Exception as exc:  # noqa: BLE001 — surface a clear, actionable message

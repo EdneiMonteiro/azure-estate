@@ -11,6 +11,7 @@ The target is ``\\\\<account>.file.core.windows.net\\<share>\\<path>``.
 """
 from __future__ import annotations
 
+import os
 import pathlib
 from typing import Iterable
 
@@ -23,6 +24,36 @@ from azure.identity import (
 from azure.storage.fileshare import ShareClient, ShareDirectoryClient
 
 
+# Directories where `az` / `pwsh` typically live. In Azure Cloud Shell the
+# Python subprocess spawned by azure-identity does not always inherit a PATH
+# that includes these, causing "Failed to invoke the Azure CLI / PowerShell".
+# Appending them (non-destructively) lets the credential locate the tools.
+_COMMON_TOOL_DIRS: tuple[str, ...] = (
+    "/usr/bin",
+    "/usr/local/bin",
+    "/bin",
+    "/opt/az/bin",
+    "/opt/microsoft/powershell/7",
+    "/usr/local/microsoft/powershell/7",
+)
+
+
+def _ensure_tools_on_path() -> None:
+    """Append common Azure tool directories to PATH if they are missing.
+
+    Safe no-op on platforms where these directories don't exist (e.g. Windows).
+    """
+    existing = os.environ.get("PATH", "")
+    parts = existing.split(os.pathsep) if existing else []
+    changed = False
+    for directory in _COMMON_TOOL_DIRS:
+        if directory not in parts and os.path.isdir(directory):
+            parts.append(directory)
+            changed = True
+    if changed:
+        os.environ["PATH"] = os.pathsep.join(parts)
+
+
 def _signed_in_user_credential() -> ChainedTokenCredential:
     """Credential for the signed-in user (Azure CLI or Azure PowerShell).
 
@@ -32,7 +63,11 @@ def _signed_in_user_credential() -> ChainedTokenCredential:
     which aborts the chain before the already-signed-in CLI/PowerShell
     identity is ever tried. Chaining those two directly uses the logged-in
     user and works in Cloud Shell (bash and PowerShell) and local dev alike.
+
+    ``_ensure_tools_on_path`` is called first so the credentials can locate
+    ``az`` / ``pwsh`` even when Cloud Shell's Python subprocess PATH is trimmed.
     """
+    _ensure_tools_on_path()
     return ChainedTokenCredential(
         AzureCliCredential(),
         AzurePowerShellCredential(),
