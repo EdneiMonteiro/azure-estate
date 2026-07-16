@@ -24,3 +24,12 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 TENANT_ID = os.environ.get("AZURE_TENANT_ID", "")
+
+# ---------------------------------------------------------------------------
+# Azure File Share upload target (used by `main.py --upload`).
+# The reports are uploaded to \\<account>.file.core.windows.net\<share>\<path>
+# using the signed-in user's Microsoft Entra identity (OAuth over REST).
+# ---------------------------------------------------------------------------
+STORAGE_ACCOUNT = os.environ.get("ARI_STORAGE_ACCOUNT", "stgtestelogdiag")
+FILE_SHARE = os.environ.get("ARI_FILE_SHARE", "ari-bridge")
+SHARE_PATH = os.environ.get("ARI_SHARE_PATH", "AzureResourceInventory")

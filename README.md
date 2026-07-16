@@ -40,6 +40,7 @@ Leia também:
 - Coleta de recursos via Azure Resource Graph (`ari/collectors/`)
 - Autenticação com `azure-identity` (`DefaultAzureCredential`)
 - Exportação para Excel com `openpyxl`/`pandas` (`ari/exporters/`)
+- Envio dos relatórios para Azure File Share via Microsoft Entra ID / OAuth (`ari/exporters/file_share.py`)
 - Relatórios extensíveis por registro (`ari/reports/`):
   - `subscriptions` — assinaturas
   - `resource_groups` — grupos de recursos
@@ -70,7 +71,21 @@ Leia também:
    python main.py --list                 # lista relatórios disponíveis
    python main.py --report subscriptions # executa um relatório (saída em ./output/)
    ```
-5. Valide o comportamento antes de qualquer adaptação
+5. (Opcional) Envie os relatórios para um Azure File Share usando a identidade
+   Microsoft Entra do usuário logado (OAuth, sem chaves de conta):
+   ```bash
+   # Gera e envia em seguida
+   python main.py --report resource_types --upload
+
+   # Apenas envia os .xlsx já gerados em ./output/
+   python main.py --upload
+   ```
+   O destino padrão vem de `.env` (`ARI_STORAGE_ACCOUNT`, `ARI_FILE_SHARE`,
+   `ARI_SHARE_PATH`) e pode ser sobrescrito com `--storage-account`, `--share`
+   e `--share-path`. O usuário precisa do papel **Storage File Data Privileged
+   Contributor** na storage account, e a conta deve permitir autenticação
+   Microsoft Entra (OAuth) para file shares.
+6. Valide o comportamento antes de qualquer adaptação
 
 ## Estrutura
 

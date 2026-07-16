@@ -42,11 +42,72 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="output",
         help="Directory where the Excel file will be saved (default: ./output/).",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--upload",
+        action="store_true",
+        help=(
+            "Upload the generated .xlsx reports from the output directory to an "
+            "Azure File Share using the signed-in user's Microsoft Entra identity."
+        ),
+    )
+    parser.add_argument(
+        "--storage-account",
+        metavar="NAME",
+        help="Storage account for --upload (default: ARI_STORAGE_ACCOUNT env).",
+    )
+    parser.add_argument(
+        "--share",
+        metavar="NAME",
+        help="File share name for --upload (default: ARI_FILE_SHARE env).",
+    )
+    parser.add_argument(
+        "--share-path",
+        metavar="PATH",
+        help="Directory inside the share for --upload (default: ARI_SHARE_PATH env).",
+    )
+    return parser, parser.parse_args(argv)
+
+
+def _upload_reports(args: argparse.Namespace) -> int:
+    from ari.config import FILE_SHARE, SHARE_PATH, STORAGE_ACCOUNT
+    from ari.exporters.file_share import FileShareUploader
+
+    account = args.storage_account or STORAGE_ACCOUNT
+    share = args.share or FILE_SHARE
+    share_path = args.share_path if args.share_path is not None else SHARE_PATH
+
+    if not account or not share:
+        print(
+            "[ERROR] Upload requires a storage account and share. Set "
+            "ARI_STORAGE_ACCOUNT / ARI_FILE_SHARE or use --storage-account / --share."
+        )
+        return 1
+
+    uploader = FileShareUploader(account, share, share_path)
+    print(f"[ARI] Uploading reports from '{args.output}' to {uploader.target_uri} …")
+    try:
+        uploaded = uploader.upload_directory(args.output)
+    except Exception as exc:  # noqa: BLE001 — surface a clear, actionable message
+        print(f"[ERROR] Upload failed: {exc}")
+        print(
+            "       Ensure the signed-in user has the 'Storage File Data Privileged "
+            "Contributor' role on the storage account and that the account allows "
+            "Microsoft Entra (OAuth) authentication for file shares."
+        )
+        return 1
+
+    if not uploaded:
+        print(f"[ARI] No .xlsx files found in '{args.output}'. Nothing uploaded.")
+        return 0
+
+    print(f"[ARI] Uploaded {len(uploaded)} file(s):")
+    for name in uploaded:
+        print(f"      - {name}")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
+    parser, args = parse_args(argv)
 
     if args.list:
         print("Available reports:")
@@ -54,32 +115,37 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {name}")
         return 0
 
-    if not args.report:
+    if not args.report and not args.upload:
         parser.print_help()
         return 0
 
-    report_name = args.report.lower()
-    if report_name not in REPORT_REGISTRY:
-        print(
-            f"[ERROR] Unknown report '{report_name}'. "
-            f"Use --list to see available reports."
-        )
-        return 1
+    if args.report:
+        report_name = args.report.lower()
+        if report_name not in REPORT_REGISTRY:
+            print(
+                f"[ERROR] Unknown report '{report_name}'. "
+                f"Use --list to see available reports."
+            )
+            return 1
 
-    report_cls = REPORT_REGISTRY[report_name]
-    report = report_cls()
+        report_cls = REPORT_REGISTRY[report_name]
+        report = report_cls()
 
-    print(f"[ARI] Running report: {report_name}")
-    df = report.run()
+        print(f"[ARI] Running report: {report_name}")
+        df = report.run()
 
-    # Reports may override export() to produce richer workbooks (e.g. with charts)
-    if hasattr(report, "export"):
-        report.export(df, output_dir=args.output)
-    else:
-        exporter = ExcelExporter(output_dir=args.output)
-        path = exporter.save(df, sheet_name=report.name)
-        print(f"[ARI] Done. File saved to: {path.resolve()}")
-        print(f"      Rows exported: {len(df)}")
+        # Reports may override export() to produce richer workbooks (e.g. with charts)
+        if hasattr(report, "export"):
+            report.export(df, output_dir=args.output)
+        else:
+            exporter = ExcelExporter(output_dir=args.output)
+            path = exporter.save(df, sheet_name=report.name)
+            print(f"[ARI] Done. File saved to: {path.resolve()}")
+            print(f"      Rows exported: {len(df)}")
+
+    if args.upload:
+        return _upload_reports(args)
+
     return 0
 
 
