@@ -72,6 +72,7 @@ def _upload_reports(args: argparse.Namespace) -> int:
     from ari.config import FILE_SHARE, SHARE_PATH, STORAGE_ACCOUNT
 
     try:
+        from azure.core.exceptions import ClientAuthenticationError
         from ari.exporters.file_share import FileShareUploader
     except ModuleNotFoundError as exc:
         print(
@@ -96,6 +97,13 @@ def _upload_reports(args: argparse.Namespace) -> int:
     print(f"[ARI] Uploading reports from '{args.output}' to {uploader.target_uri} …")
     try:
         uploaded = uploader.upload_directory(args.output)
+    except ClientAuthenticationError as exc:
+        print(f"[ERROR] Authentication failed: {exc}")
+        print(
+            "       Sign in with the Azure CLI first:  az login\n"
+            "       (or Connect-AzAccount for Azure PowerShell)."
+        )
+        return 1
     except Exception as exc:  # noqa: BLE001 — surface a clear, actionable message
         print(f"[ERROR] Upload failed: {exc}")
         print(

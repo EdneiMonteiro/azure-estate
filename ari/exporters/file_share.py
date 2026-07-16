@@ -14,8 +14,8 @@ from __future__ import annotations
 import pathlib
 from typing import Iterable
 
-from azure.core.exceptions import ResourceExistsError
-from azure.identity import AzureCliCredential
+from azure.core.exceptions import ClientAuthenticationError, ResourceExistsError
+from azure.identity import DefaultAzureCredential
 from azure.storage.fileshare import ShareClient, ShareDirectoryClient
 
 
@@ -27,13 +27,15 @@ class FileShareUploader:
         account_name: str,
         share_name: str,
         share_path: str = "",
-        credential: AzureCliCredential | None = None,
+        credential=None,
     ) -> None:
         self._account_name = account_name
         self._share_name = share_name
         # Normalize to forward slashes and strip leading/trailing separators.
         self._share_path = share_path.replace("\\", "/").strip("/")
-        self._credential = credential or AzureCliCredential()
+        # DefaultAzureCredential resolves the signed-in user via the Azure CLI,
+        # Azure PowerShell, environment variables or managed identity.
+        self._credential = credential or DefaultAzureCredential()
 
     # -- internal helpers ---------------------------------------------------
     def _share_client(self) -> ShareClient:
