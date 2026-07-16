@@ -85,6 +85,15 @@ Leia também:
    e `--share-path`. O usuário precisa do papel **Storage File Data Privileged
    Contributor** na storage account, e a conta deve permitir autenticação
    Microsoft Entra (OAuth) para file shares.
+
+   No **Azure Cloud Shell**, o broker de token não consegue emitir tokens de
+   data-plane (`storage.azure.com`), então o modo OAuth falha. Use o modo de
+   chave (obtida via ARM), que funciona nesse ambiente e exige permissão para
+   listar chaves (Contributor / Storage Account Contributor):
+   ```bash
+   python main.py --upload --auth-mode key \
+     --subscription <sub-id> --resource-group <rg>
+   ```
 6. Valide o comportamento antes de qualquer adaptação
 
 ## Estrutura

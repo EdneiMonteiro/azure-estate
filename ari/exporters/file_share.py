@@ -174,8 +174,85 @@ def _signed_in_user_credential() -> ChainedTokenCredential:
     )
 
 
+def _get_account_key_via_cli(
+    account_name: str,
+    resource_group: str | None = None,
+    subscription: str | None = None,
+) -> str:
+    """Fetch a storage account key using the Azure CLI (ARM management plane).
+
+    Unlike the data-plane ``storage.azure.com`` audience, the ARM audience works
+    in Azure Cloud Shell, so this succeeds where OAuth file-share access times
+    out. Requires the signed-in user to have permission to list account keys
+    (e.g. Contributor or Storage Account Contributor on the account).
+
+    ``az`` resolves the account within the active subscription, so pass
+    *subscription* when the account lives outside the CLI's default context.
+    """
+    _ensure_tools_on_path()
+    az = shutil.which("az") or ("/usr/bin/az" if os.path.isfile("/usr/bin/az") else "az")
+    cmd = [
+        az,
+        "storage",
+        "account",
+        "keys",
+        "list",
+        "--account-name",
+        account_name,
+        "--query",
+        "[0].value",
+        "--output",
+        "tsv",
+    ]
+    if resource_group:
+        cmd += ["--resource-group", resource_group]
+    if subscription:
+        cmd += ["--subscription", subscription]
+
+    try:
+        timeout = int(os.environ.get("ARI_AZ_TOKEN_TIMEOUT", "120"))
+    except ValueError:
+        timeout = 120
+
+    try:
+        completed = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout, check=True
+        )
+    except FileNotFoundError as exc:
+        raise ClientAuthenticationError(
+            message=f"Azure CLI not found at '{az}'."
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise ClientAuthenticationError(
+            message=f"Timed out ({timeout}s) listing account keys via the Azure CLI."
+        ) from exc
+    except subprocess.CalledProcessError as exc:
+        raise ClientAuthenticationError(
+            message=(
+                "Azure CLI could not list account keys: "
+                f"{(exc.stderr or exc.stdout).strip()}"
+            )
+        ) from exc
+
+    key = completed.stdout.strip()
+    if not key:
+        raise ClientAuthenticationError(
+            message="Azure CLI returned an empty account key."
+        )
+    return key
+
+
 class FileShareUploader:
-    """Uploads local files to a directory inside an Azure File Share via Entra ID."""
+    """Uploads local files to a directory inside an Azure File Share.
+
+    Two authentication modes:
+      * ``"login"`` (default) — the signed-in user's Microsoft Entra identity
+        (OAuth over REST). Fails in environments that cannot mint a
+        ``storage.azure.com`` data-plane token (e.g. Azure Cloud Shell).
+      * ``"key"`` — a storage account key obtained via the ARM management plane
+        (``az storage account keys list``). Works in Cloud Shell; requires
+        permission to list keys.
+    """
 
     def __init__(
         self,
@@ -183,20 +260,39 @@ class FileShareUploader:
         share_name: str,
         share_path: str = "",
         credential=None,
+        auth_mode: str = "login",
+        resource_group: str | None = None,
+        subscription: str | None = None,
     ) -> None:
         self._account_name = account_name
         self._share_name = share_name
         # Normalize to forward slashes and strip leading/trailing separators.
         self._share_path = share_path.replace("\\", "/").strip("/")
-        # Use the signed-in user's identity (CLI/PowerShell), not managed identity.
-        self._credential = credential or _signed_in_user_credential()
+        self._auth_mode = auth_mode
+        self._resource_group = resource_group
+        self._subscription = subscription
+        self._explicit_credential = credential
 
     # -- internal helpers ---------------------------------------------------
     def _share_client(self) -> ShareClient:
+        account_url = f"https://{self._account_name}.file.core.windows.net"
+
+        if self._auth_mode == "key":
+            key = _get_account_key_via_cli(
+                self._account_name, self._resource_group, self._subscription
+            )
+            # Account-key auth does not use (and rejects) token_intent.
+            return ShareClient(
+                account_url=account_url,
+                share_name=self._share_name,
+                credential={"account_name": self._account_name, "account_key": key},
+            )
+
+        credential = self._explicit_credential or _signed_in_user_credential()
         return ShareClient(
-            account_url=f"https://{self._account_name}.file.core.windows.net",
+            account_url=account_url,
             share_name=self._share_name,
-            credential=self._credential,
+            credential=credential,
             # Required for OAuth (Microsoft Entra ID) access to Azure file shares.
             token_intent="backup",
         )

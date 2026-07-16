@@ -65,11 +65,43 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="PATH",
         help="Directory inside the share for --upload (default: ARI_SHARE_PATH env).",
     )
+    parser.add_argument(
+        "--auth-mode",
+        choices=["login", "key"],
+        help=(
+            "Authentication for --upload: 'login' uses the signed-in Entra "
+            "identity (OAuth); 'key' uses an account key obtained via ARM "
+            "(works in Azure Cloud Shell). Default: ARI_UPLOAD_AUTH_MODE or login."
+        ),
+    )
+    parser.add_argument(
+        "--resource-group",
+        metavar="NAME",
+        help=(
+            "Resource group of the storage account, used by --auth-mode key "
+            "(default: ARI_RESOURCE_GROUP env; the CLI can auto-resolve it)."
+        ),
+    )
+    parser.add_argument(
+        "--subscription",
+        metavar="ID",
+        help=(
+            "Subscription of the storage account, used by --auth-mode key "
+            "(default: ARI_SUBSCRIPTION env or the CLI's active subscription)."
+        ),
+    )
     return parser, parser.parse_args(argv)
 
 
 def _upload_reports(args: argparse.Namespace) -> int:
-    from ari.config import FILE_SHARE, SHARE_PATH, STORAGE_ACCOUNT
+    from ari.config import (
+        FILE_SHARE,
+        RESOURCE_GROUP,
+        SHARE_PATH,
+        STORAGE_ACCOUNT,
+        SUBSCRIPTION,
+        UPLOAD_AUTH_MODE,
+    )
 
     try:
         from azure.core.exceptions import ClientAuthenticationError
@@ -85,6 +117,9 @@ def _upload_reports(args: argparse.Namespace) -> int:
     account = args.storage_account or STORAGE_ACCOUNT
     share = args.share or FILE_SHARE
     share_path = args.share_path if args.share_path is not None else SHARE_PATH
+    auth_mode = args.auth_mode or UPLOAD_AUTH_MODE or "login"
+    resource_group = args.resource_group or RESOURCE_GROUP or None
+    subscription = args.subscription or SUBSCRIPTION or None
 
     if not account or not share:
         print(
@@ -93,26 +128,44 @@ def _upload_reports(args: argparse.Namespace) -> int:
         )
         return 1
 
-    uploader = FileShareUploader(account, share, share_path)
-    print(f"[ARI] Uploading reports from '{args.output}' to {uploader.target_uri} …")
+    uploader = FileShareUploader(
+        account,
+        share,
+        share_path,
+        auth_mode=auth_mode,
+        resource_group=resource_group,
+        subscription=subscription,
+    )
+    print(
+        f"[ARI] Uploading reports from '{args.output}' to {uploader.target_uri} "
+        f"(auth-mode: {auth_mode}) …"
+    )
     try:
         uploaded = uploader.upload_directory(args.output)
     except ClientAuthenticationError as exc:
         print(f"[ERROR] Authentication failed: {exc}")
-        print(
-            "       Could not acquire a token from the signed-in identity.\n"
-            "       - Local dev: run 'az login' (or Connect-AzAccount).\n"
-            "       - Azure Cloud Shell: ensure 'az account get-access-token' works;\n"
-            "         if 'az'/'pwsh' are reported as not invokable, verify they are on\n"
-            "         PATH (which az / which pwsh)."
-        )
+        if auth_mode == "login":
+            print(
+                "       Could not acquire a data-plane token for the signed-in "
+                "identity.\n"
+                "       - Local dev: run 'az login' (or Connect-AzAccount).\n"
+                "       - Azure Cloud Shell: the token broker cannot mint "
+                "storage.azure.com tokens; retry with '--auth-mode key'."
+            )
+        else:
+            print(
+                "       Could not list the account key via ARM. Ensure the "
+                "signed-in user can list keys (Contributor or Storage Account "
+                "Contributor) and pass --resource-group if auto-resolution fails."
+            )
         return 1
     except Exception as exc:  # noqa: BLE001 — surface a clear, actionable message
         print(f"[ERROR] Upload failed: {exc}")
         print(
             "       Ensure the signed-in user has the 'Storage File Data Privileged "
-            "Contributor' role on the storage account and that the account allows "
-            "Microsoft Entra (OAuth) authentication for file shares."
+            "Contributor' role on the storage account (for --auth-mode login) and "
+            "that the account allows Microsoft Entra (OAuth) authentication for "
+            "file shares."
         )
         return 1
 
