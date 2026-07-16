@@ -11,10 +11,15 @@ The target is ``\\\\<account>.file.core.windows.net\\<share>\\<path>``.
 """
 from __future__ import annotations
 
+import json
 import os
 import pathlib
-from typing import Iterable
+import shutil
+import subprocess
+from datetime import datetime, timezone
+from typing import Any, Iterable
 
+from azure.core.credentials import AccessToken
 from azure.core.exceptions import ClientAuthenticationError, ResourceExistsError
 from azure.identity import (
     AzureCliCredential,
@@ -54,23 +59,106 @@ def _ensure_tools_on_path() -> None:
         os.environ["PATH"] = os.pathsep.join(parts)
 
 
+def _scope_to_resource(scope: str) -> str:
+    """Convert an OAuth scope (…/.default) to an Azure CLI --resource value."""
+    resource = scope
+    if resource.endswith("/.default"):
+        resource = resource[: -len("/.default")]
+    return resource.rstrip("/")
+
+
+class _DirectAzureCliCredential:
+    """Reuses the session's ``az`` token by invoking the CLI binary directly.
+
+    ``azure-identity``'s ``AzureCliCredential`` spawns ``/bin/sh -c "az …"`` and
+    has been observed to fail with "Failed to invoke the Azure CLI" in some
+    Azure Cloud Shell sessions even though ``az`` is installed and on PATH.
+    This credential calls the resolved ``az`` binary directly (no shell wrapper)
+    and returns the token it already holds — which, unlike an interactive or
+    device-code sign-in, satisfies Conditional Access because it is the token
+    the compliant Cloud Shell session already obtained.
+    """
+
+    def __init__(self) -> None:
+        self._az = shutil.which("az") or (
+            "/usr/bin/az" if os.path.isfile("/usr/bin/az") else "az"
+        )
+
+    def get_token(self, *scopes: str, **kwargs: Any) -> AccessToken:
+        if not scopes:
+            raise ClientAuthenticationError(message="No scope provided for token.")
+        resource = _scope_to_resource(scopes[0])
+        cmd = [
+            self._az,
+            "account",
+            "get-access-token",
+            "--resource",
+            resource,
+            "--output",
+            "json",
+        ]
+        tenant = kwargs.get("tenant_id")
+        if tenant:
+            cmd += ["--tenant", tenant]
+
+        try:
+            completed = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=True,
+            )
+        except FileNotFoundError as exc:
+            raise ClientAuthenticationError(
+                message=f"Azure CLI not found at '{self._az}'."
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise ClientAuthenticationError(
+                message="Timed out invoking the Azure CLI."
+            ) from exc
+        except subprocess.CalledProcessError as exc:
+            raise ClientAuthenticationError(
+                message=f"Azure CLI returned an error: {exc.stderr or exc.stdout}"
+            ) from exc
+
+        data = json.loads(completed.stdout)
+        token = data["accessToken"]
+
+        # Prefer the epoch field when present; otherwise parse the local string.
+        expires_on = data.get("expires_on")
+        if expires_on is None:
+            raw = data.get("expiresOn", "")
+            try:
+                expires_on = int(
+                    datetime.strptime(raw, "%Y-%m-%d %H:%M:%S.%f").timestamp()
+                )
+            except ValueError:
+                expires_on = int(datetime.now(timezone.utc).timestamp()) + 3600
+        return AccessToken(token, int(expires_on))
+
+
 def _signed_in_user_credential() -> ChainedTokenCredential:
-    """Credential for the signed-in user (Azure CLI or Azure PowerShell).
+    """Credential for the signed-in user, resilient to broken shells and CA.
 
-    A plain ``DefaultAzureCredential`` is deliberately avoided here: inside
-    Azure Cloud Shell it detects the managed-identity endpoint and blocks on
-    ``ManagedIdentityCredential`` ("Timeout waiting for token from portal"),
-    which aborts the chain before the already-signed-in CLI/PowerShell
-    identity is ever tried. Chaining those two directly uses the logged-in
-    user and works in Cloud Shell (bash and PowerShell) and local dev alike.
+    A plain ``DefaultAzureCredential`` is deliberately avoided: inside Azure
+    Cloud Shell it blocks on ``ManagedIdentityCredential`` ("Timeout waiting for
+    token from portal"), aborting the chain before the signed-in identity is
+    tried. Interactive / device-code fallbacks are also avoided because
+    Conditional Access policies block them.
 
-    ``_ensure_tools_on_path`` is called first so the credentials can locate
-    ``az`` / ``pwsh`` even when Cloud Shell's Python subprocess PATH is trimmed.
+    The chain tries, in order:
+      1. ``AzureCliCredential`` — azure-identity's shell-based CLI credential.
+      2. ``AzurePowerShellCredential`` — azure-identity's PowerShell credential.
+      3. ``_DirectAzureCliCredential`` — calls the ``az`` binary directly,
+         reusing the compliant session token (works when 1./2. can't spawn a
+         subprocess and when CA blocks interactive sign-in).
     """
     _ensure_tools_on_path()
     return ChainedTokenCredential(
         AzureCliCredential(),
         AzurePowerShellCredential(),
+        _DirectAzureCliCredential(),
     )
 
 
