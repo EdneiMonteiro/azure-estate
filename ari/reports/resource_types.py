@@ -7,6 +7,7 @@ from ari.collectors.resource_types import list_resource_types
 from ari.config import TENANT_ID
 from ari.exporters.excel import ExcelExporter
 from ari.reports.base import BaseReport
+from ari.resource_type_configs import friendly_resource_name
 
 
 class ResourceTypeReport(BaseReport):
@@ -22,12 +23,19 @@ class ResourceTypeReport(BaseReport):
 
         if not data:
             print("  No resources found.")
-            return pd.DataFrame(columns=["Tipo de Recurso", "Qtd. Recursos"])
+            return pd.DataFrame(columns=["Recurso", "Tipo de Recurso", "Qtd. Recursos"])
 
         print(f"  Found {len(data)} distinct resource type(s).")
 
         df = pd.DataFrame(
-            [{"Tipo de Recurso": d["type"], "Qtd. Recursos": d["resource_count"]} for d in data]
+            [
+                {
+                    "Recurso": friendly_resource_name(d["type"]),
+                    "Tipo de Recurso": d["type"],
+                    "Qtd. Recursos": d["resource_count"],
+                }
+                for d in data
+            ]
         )
         df.sort_values("Qtd. Recursos", ascending=False, inplace=True, ignore_index=True)
         return df
@@ -37,7 +45,7 @@ class ResourceTypeReport(BaseReport):
         exporter = ExcelExporter(output_dir=output_dir)
         path = exporter.save_with_pie_chart(
             df=df,
-            label_col="Tipo de Recurso",
+            label_col="Recurso",
             value_col="Qtd. Recursos",
             sheet_name=self.name,
             chart_sheet_name="Gráfico",
