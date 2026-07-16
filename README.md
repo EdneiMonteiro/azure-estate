@@ -70,6 +70,7 @@ Leia também:
    ```bash
    python main.py --list                 # lista relatórios disponíveis
    python main.py --report subscriptions # executa um relatório (saída em ./output/)
+   python main.py --report all           # executa todos os relatórios de uma vez
    ```
 5. (Opcional) Envie os relatórios para um Azure File Share usando a identidade
    Microsoft Entra do usuário logado (OAuth, sem chaves de conta):

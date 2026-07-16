@@ -8,6 +8,9 @@ python main.py --list
 # Run a specific report (output goes to ./output/ by default)
 python main.py --report subscriptions
 
+# Run every report at once
+python main.py --report all
+
 # Specify a custom output directory
 python main.py --report subscriptions --output /tmp/ari
 """
@@ -29,7 +32,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--report",
         metavar="NAME",
-        help="Name of the report to run (see --list).",
+        help="Name of the report to run, or 'all' to run every report (see --list).",
     )
     parser.add_argument(
         "--list",
@@ -179,6 +182,24 @@ def _upload_reports(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_report(report_name: str, output_dir: str) -> None:
+    """Run a single report by name and write its Excel output."""
+    report_cls = REPORT_REGISTRY[report_name]
+    report = report_cls()
+
+    print(f"[ARI] Running report: {report_name}")
+    df = report.run()
+
+    # Reports may override export() to produce richer workbooks (e.g. with charts)
+    if hasattr(report, "export"):
+        report.export(df, output_dir=output_dir)
+    else:
+        exporter = ExcelExporter(output_dir=output_dir)
+        path = exporter.save(df, sheet_name=report.name)
+        print(f"[ARI] Done. File saved to: {path.resolve()}")
+        print(f"      Rows exported: {len(df)}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser, args = parse_args(argv)
 
@@ -194,27 +215,18 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.report:
         report_name = args.report.lower()
-        if report_name not in REPORT_REGISTRY:
+
+        if report_name == "all":
+            for name in REPORT_REGISTRY:
+                _run_report(name, args.output)
+        elif report_name not in REPORT_REGISTRY:
             print(
                 f"[ERROR] Unknown report '{report_name}'. "
                 f"Use --list to see available reports."
             )
             return 1
-
-        report_cls = REPORT_REGISTRY[report_name]
-        report = report_cls()
-
-        print(f"[ARI] Running report: {report_name}")
-        df = report.run()
-
-        # Reports may override export() to produce richer workbooks (e.g. with charts)
-        if hasattr(report, "export"):
-            report.export(df, output_dir=args.output)
         else:
-            exporter = ExcelExporter(output_dir=args.output)
-            path = exporter.save(df, sheet_name=report.name)
-            print(f"[ARI] Done. File saved to: {path.resolve()}")
-            print(f"      Rows exported: {len(df)}")
+            _run_report(report_name, args.output)
 
     if args.upload:
         return _upload_reports(args)
