@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pandas as pd
 
-from ari.auth import get_credential
-from ari.collectors.resource_groups import list_resource_groups
-from ari.config import TENANT_ID
-from ari.reports.base import BaseReport
+from azure_estate.auth import get_credential
+from azure_estate.collectors.resource_groups import list_resource_groups
+from azure_estate.config import TENANT_ID
+from azure_estate.reports.base import BaseReport
 
 
 class ResourceGroupReport(BaseReport):

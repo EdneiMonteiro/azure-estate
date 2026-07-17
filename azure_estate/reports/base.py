@@ -5,7 +5,7 @@ import pandas as pd
 
 
 class BaseReport(abc.ABC):
-    """Contract that every ARI report must satisfy.
+    """Contract that every Azure Estate report must satisfy.
 
     Subclasses implement `run()` and return a tidy DataFrame whose columns
     are ready to be exported directly to Excel.

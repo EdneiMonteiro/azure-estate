@@ -1,4 +1,4 @@
-"""ARI — Azure Resource Inventory
+"""Azure Estate — Azure Resource Inventory
 
 Usage examples
 --------------
@@ -12,7 +12,7 @@ python main.py --report subscriptions
 python main.py --report all
 
 # Specify a custom output directory
-python main.py --report subscriptions --output /tmp/ari
+python main.py --report subscriptions --output /tmp/azure-estate
 """
 
 from __future__ import annotations
@@ -20,13 +20,13 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ari.exporters.excel import ExcelExporter
-from ari.reports import REPORT_REGISTRY
+from azure_estate.exporters.excel import ExcelExporter
+from azure_estate.reports import REPORT_REGISTRY
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="ari",
+        prog="azure-estate",
         description="Azure Resource Inventory — generate Excel reports from Azure.",
     )
     parser.add_argument(
@@ -56,17 +56,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--storage-account",
         metavar="NAME",
-        help="Storage account for --upload (default: ARI_STORAGE_ACCOUNT env).",
+        help="Storage account for --upload (default: AZE_STORAGE_ACCOUNT env).",
     )
     parser.add_argument(
         "--share",
         metavar="NAME",
-        help="File share name for --upload (default: ARI_FILE_SHARE env).",
+        help="File share name for --upload (default: AZE_FILE_SHARE env).",
     )
     parser.add_argument(
         "--share-path",
         metavar="PATH",
-        help="Directory inside the share for --upload (default: ARI_SHARE_PATH env).",
+        help="Directory inside the share for --upload (default: AZE_SHARE_PATH env).",
     )
     parser.add_argument(
         "--auth-mode",
@@ -74,7 +74,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Authentication for --upload: 'login' uses the signed-in Entra "
             "identity (OAuth); 'key' uses an account key obtained via ARM "
-            "(works in Azure Cloud Shell). Default: ARI_UPLOAD_AUTH_MODE or login."
+            "(works in Azure Cloud Shell). Default: AZE_UPLOAD_AUTH_MODE or login."
         ),
     )
     parser.add_argument(
@@ -82,7 +82,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="NAME",
         help=(
             "Resource group of the storage account, used by --auth-mode key "
-            "(default: ARI_RESOURCE_GROUP env; the CLI can auto-resolve it)."
+            "(default: AZE_RESOURCE_GROUP env; the CLI can auto-resolve it)."
         ),
     )
     parser.add_argument(
@@ -90,14 +90,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="ID",
         help=(
             "Subscription of the storage account, used by --auth-mode key "
-            "(default: ARI_SUBSCRIPTION env or the CLI's active subscription)."
+            "(default: AZE_SUBSCRIPTION env or the CLI's active subscription)."
         ),
     )
     return parser, parser.parse_args(argv)
 
 
 def _upload_reports(args: argparse.Namespace) -> int:
-    from ari.config import (
+    from azure_estate.config import (
         FILE_SHARE,
         RESOURCE_GROUP,
         SHARE_PATH,
@@ -108,7 +108,7 @@ def _upload_reports(args: argparse.Namespace) -> int:
 
     try:
         from azure.core.exceptions import ClientAuthenticationError
-        from ari.exporters.file_share import FileShareUploader
+        from azure_estate.exporters.file_share import FileShareUploader
     except ModuleNotFoundError as exc:
         print(
             f"[ERROR] Missing dependency for --upload: {exc.name}.\n"
@@ -127,7 +127,7 @@ def _upload_reports(args: argparse.Namespace) -> int:
     if not account or not share:
         print(
             "[ERROR] Upload requires a storage account and share. Set "
-            "ARI_STORAGE_ACCOUNT / ARI_FILE_SHARE or use --storage-account / --share."
+            "AZE_STORAGE_ACCOUNT / AZE_FILE_SHARE or use --storage-account / --share."
         )
         return 1
 
@@ -140,7 +140,7 @@ def _upload_reports(args: argparse.Namespace) -> int:
         subscription=subscription,
     )
     print(
-        f"[ARI] Uploading reports from '{args.output}' to {uploader.target_uri} "
+        f"[AzEstate] Uploading reports from '{args.output}' to {uploader.target_uri} "
         f"(auth-mode: {auth_mode}) …"
     )
     try:
@@ -173,10 +173,10 @@ def _upload_reports(args: argparse.Namespace) -> int:
         return 1
 
     if not uploaded:
-        print(f"[ARI] No .xlsx files found in '{args.output}'. Nothing uploaded.")
+        print(f"[AzEstate] No .xlsx files found in '{args.output}'. Nothing uploaded.")
         return 0
 
-    print(f"[ARI] Uploaded {len(uploaded)} file(s):")
+    print(f"[AzEstate] Uploaded {len(uploaded)} file(s):")
     for name in uploaded:
         print(f"      - {name}")
     return 0
@@ -187,7 +187,7 @@ def _run_report(report_name: str, output_dir: str) -> None:
     report_cls = REPORT_REGISTRY[report_name]
     report = report_cls()
 
-    print(f"[ARI] Running report: {report_name}")
+    print(f"[AzEstate] Running report: {report_name}")
     df = report.run()
 
     # Reports may override export() to produce richer workbooks (e.g. with charts)
@@ -196,7 +196,7 @@ def _run_report(report_name: str, output_dir: str) -> None:
     else:
         exporter = ExcelExporter(output_dir=output_dir)
         path = exporter.save(df, sheet_name=report.name)
-        print(f"[ARI] Done. File saved to: {path.resolve()}")
+        print(f"[AzEstate] Done. File saved to: {path.resolve()}")
         print(f"      Rows exported: {len(df)}")
 
 

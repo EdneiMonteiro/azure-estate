@@ -4,13 +4,13 @@ from datetime import date
 
 import pandas as pd
 
-from ari.auth import get_credential
-from ari.collectors.resource_details import query_resource_type
-from ari.collectors.subscriptions import list_active_subscriptions
-from ari.config import TENANT_ID
-from ari.exporters.excel import ExcelExporter
-from ari.reports.base import BaseReport
-from ari.resource_type_configs import RESOURCE_CONFIGS
+from azure_estate.auth import get_credential
+from azure_estate.collectors.resource_details import query_resource_type
+from azure_estate.collectors.subscriptions import list_active_subscriptions
+from azure_estate.config import TENANT_ID
+from azure_estate.exporters.excel import ExcelExporter
+from azure_estate.reports.base import BaseReport
+from azure_estate.resource_type_configs import RESOURCE_CONFIGS
 
 
 class ResourceDetailReport(BaseReport):
@@ -59,5 +59,5 @@ class ResourceDetailReport(BaseReport):
         path = exporter.save_multi_sheet(sheets, filename)
 
         total_rows = sum(len(df) for _, df in sheets)
-        print(f"\n[ARI] Done. File saved to: {path.resolve()}")
+        print(f"\n[AzEstate] Done. File saved to: {path.resolve()}")
         print(f"      Sheets: {len(sheets)}  |  Total rows: {total_rows}")

@@ -104,7 +104,7 @@ class _DirectAzureCliCredential:
         # Cloud Shell's token broker can be slow for non-ARM audiences; allow a
         # generous, overridable timeout.
         try:
-            timeout = int(os.environ.get("ARI_AZ_TOKEN_TIMEOUT", "120"))
+            timeout = int(os.environ.get("AZE_AZ_TOKEN_TIMEOUT") or os.environ.get("ARI_AZ_TOKEN_TIMEOUT") or "120")
         except ValueError:
             timeout = 120
 
@@ -210,7 +210,7 @@ def _get_account_key_via_cli(
         cmd += ["--subscription", subscription]
 
     try:
-        timeout = int(os.environ.get("ARI_AZ_TOKEN_TIMEOUT", "120"))
+        timeout = int(os.environ.get("AZE_AZ_TOKEN_TIMEOUT") or os.environ.get("ARI_AZ_TOKEN_TIMEOUT") or "120")
     except ValueError:
         timeout = 120
 

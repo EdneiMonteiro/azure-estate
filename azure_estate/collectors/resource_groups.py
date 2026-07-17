@@ -5,8 +5,8 @@ from typing import Any
 from azure.identity import AzureCliCredential
 from azure.mgmt.resourcegraph import ResourceGraphClient
 
-from ari.collectors._graph import run_graph_query
-from ari.collectors.subscriptions import list_active_subscriptions
+from azure_estate.collectors._graph import run_graph_query
+from azure_estate.collectors.subscriptions import list_active_subscriptions
 
 
 def list_resource_groups(

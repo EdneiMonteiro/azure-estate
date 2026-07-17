@@ -1,6 +1,6 @@
 from azure.identity import AzureCliCredential
 
-from ari.config import TENANT_ID
+from azure_estate.config import TENANT_ID
 
 
 def get_credential() -> AzureCliCredential:

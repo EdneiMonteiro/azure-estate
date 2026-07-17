@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pandas as pd
 
-from ari.auth import get_credential
-from ari.collectors.resource_types import list_resource_types
-from ari.config import TENANT_ID
-from ari.exporters.excel import ExcelExporter
-from ari.reports.base import BaseReport
-from ari.resource_type_configs import friendly_resource_name
+from azure_estate.auth import get_credential
+from azure_estate.collectors.resource_types import list_resource_types
+from azure_estate.config import TENANT_ID
+from azure_estate.exporters.excel import ExcelExporter
+from azure_estate.reports.base import BaseReport
+from azure_estate.resource_type_configs import friendly_resource_name
 
 
 class ResourceTypeReport(BaseReport):
@@ -52,5 +52,5 @@ class ResourceTypeReport(BaseReport):
             chart_title="Distribuição por Tipo de Recurso",
             top_n=15,
         )
-        print(f"[ARI] Done. File saved to: {path.resolve()}")
+        print(f"[AzEstate] Done. File saved to: {path.resolve()}")
         print(f"      Rows exported: {len(df)}")

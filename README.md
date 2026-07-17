@@ -37,13 +37,13 @@ Leia também:
 
 ## O que este exemplo demonstra
 
-- Coleta de recursos via Azure Resource Graph (`ari/collectors/`)
+- Coleta de recursos via Azure Resource Graph (`azure_estate/collectors/`)
 - Autenticação com `azure-identity` usando a identidade do usuário logado
-  (`AzureCliCredential`; `ari/auth.py`)
-- Exportação para Excel com `openpyxl`/`pandas` (`ari/exporters/`)
+  (`AzureCliCredential`; `azure_estate/auth.py`)
+- Exportação para Excel com `openpyxl`/`pandas` (`azure_estate/exporters/`)
 - Envio dos relatórios para Azure File Share, via Microsoft Entra ID (OAuth) ou
-  chave de conta obtida por ARM (`ari/exporters/file_share.py`)
-- Relatórios extensíveis por registro (`ari/reports/`):
+  chave de conta obtida por ARM (`azure_estate/exporters/file_share.py`)
+- Relatórios extensíveis por registro (`azure_estate/reports/`):
   - `subscriptions` — assinaturas
   - `resource_groups` — grupos de recursos
   - `resource_types` — tipos de recurso
@@ -85,8 +85,8 @@ Leia também:
    # Apenas envia os .xlsx já gerados em ./output/
    python main.py --upload
    ```
-   O destino padrão vem de `.env` (`ARI_STORAGE_ACCOUNT`, `ARI_FILE_SHARE`,
-   `ARI_SHARE_PATH`) e pode ser sobrescrito com `--storage-account`, `--share`
+   O destino padrão vem de `.env` (`AZE_STORAGE_ACCOUNT`, `AZE_FILE_SHARE`,
+   `AZE_SHARE_PATH`) e pode ser sobrescrito com `--storage-account`, `--share`
    e `--share-path`. O usuário precisa do papel **Storage File Data Privileged
    Contributor** na storage account, e a conta deve permitir autenticação
    Microsoft Entra (OAuth) para file shares.
@@ -104,7 +104,7 @@ Leia também:
 ## Estrutura
 
 ```
-ari/
+azure_estate/
   auth.py              # autenticação Azure (AzureCliCredential)
   config.py            # configuração (tenant, destino de upload)
   collectors/          # coleta via Resource Graph

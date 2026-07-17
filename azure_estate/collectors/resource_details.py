@@ -6,8 +6,8 @@ import pandas as pd
 from azure.identity import AzureCliCredential
 from azure.mgmt.resourcegraph import ResourceGraphClient
 
-from ari.collectors._graph import run_graph_query
-from ari.resource_type_configs import ResourceTypeConfig
+from azure_estate.collectors._graph import run_graph_query
+from azure_estate.resource_type_configs import ResourceTypeConfig
 
 # Base display-name → KQL field name mapping (injected by the query itself)
 _BASE_COLUMNS = [
