@@ -38,9 +38,11 @@ Leia também:
 ## O que este exemplo demonstra
 
 - Coleta de recursos via Azure Resource Graph (`ari/collectors/`)
-- Autenticação com `azure-identity` (`DefaultAzureCredential`)
+- Autenticação com `azure-identity` usando a identidade do usuário logado
+  (`AzureCliCredential`; `ari/auth.py`)
 - Exportação para Excel com `openpyxl`/`pandas` (`ari/exporters/`)
-- Envio dos relatórios para Azure File Share via Microsoft Entra ID / OAuth (`ari/exporters/file_share.py`)
+- Envio dos relatórios para Azure File Share, via Microsoft Entra ID (OAuth) ou
+  chave de conta obtida por ARM (`ari/exporters/file_share.py`)
 - Relatórios extensíveis por registro (`ari/reports/`):
   - `subscriptions` — assinaturas
   - `resource_groups` — grupos de recursos
@@ -50,6 +52,8 @@ Leia também:
 ## Pré-requisitos
 
 - Python 3.10+
+- Azure CLI instalado e autenticado (`az login`) — a coleta usa a identidade
+  do usuário logado (`AzureCliCredential`)
 - Credenciais Azure com permissão de leitura nas assinaturas-alvo
 
 ## Como iniciar
@@ -72,11 +76,11 @@ Leia também:
    python main.py --report subscriptions # executa um relatório (saída em ./output/)
    python main.py --report all           # executa todos os relatórios de uma vez
    ```
-5. (Opcional) Envie os relatórios para um Azure File Share usando a identidade
-   Microsoft Entra do usuário logado (OAuth, sem chaves de conta):
+5. (Opcional) Envie os relatórios para um Azure File Share. Por padrão usa a
+   identidade Microsoft Entra do usuário logado (OAuth, sem chaves de conta):
    ```bash
-   # Gera e envia em seguida
-   python main.py --report resource_types --upload
+   # Gera todos os relatórios e envia em seguida
+   python main.py --report all --upload
 
    # Apenas envia os .xlsx já gerados em ./output/
    python main.py --upload
@@ -101,10 +105,12 @@ Leia também:
 
 ```
 ari/
-  auth.py              # autenticação Azure
-  config.py            # configuração
+  auth.py              # autenticação Azure (AzureCliCredential)
+  config.py            # configuração (tenant, destino de upload)
   collectors/          # coleta via Resource Graph
-  exporters/           # exportação (Excel)
+  exporters/           # exportação: Excel + upload para File Share
+    excel.py           #   geração dos .xlsx (com gráficos)
+    file_share.py      #   envio para Azure File Share (OAuth ou chave)
   reports/             # relatórios registrados
 main.py                # CLI
 ```
@@ -121,7 +127,8 @@ O uso deste projeto está sujeito aos termos descritos em [DISCLAIMER.md](./DISC
 
 ## Contribuições
 
-Contribuições podem ser aceitas a critério do mantenedor.
+A criação de issues e pull requests é restrita a colaboradores com acesso de
+escrita. Veja [CONTRIBUTING.md](CONTRIBUTING.md) para detalhes.
 
 ## Licença
 
@@ -134,8 +141,3 @@ Os nomes e serviços da Microsoft são utilizados apenas para fins descritivos.
 Este projeto **não é afiliado, endossado ou suportado oficialmente pela Microsoft**.
 
 O uso de marcas da Microsoft não deve sugerir qualquer tipo de parceria ou suporte oficial.
-
-## 🤝 Contributing
-
-Issue and pull request creation is restricted to collaborators. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for details.
