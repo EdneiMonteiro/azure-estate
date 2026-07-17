@@ -1,4 +1,4 @@
-from azure.identity import AzureCliCredential, DefaultAzureCredential
+from azure.identity import AzureCliCredential
 
 from ari.config import TENANT_ID
 
