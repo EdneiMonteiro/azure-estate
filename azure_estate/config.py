@@ -40,10 +40,13 @@ def _env(name: str, default: str = "") -> str:
 # Azure File Share upload target (used by `main.py --upload`).
 # The reports are uploaded to \\<account>.file.core.windows.net\<share>\<path>
 # using the signed-in user's Microsoft Entra identity (OAuth over REST).
+#
+# These are intentionally empty by default so no real resource names are
+# committed. Set them in your local .env (git-ignored) or via CLI flags.
 # ---------------------------------------------------------------------------
-STORAGE_ACCOUNT = _env("AZE_STORAGE_ACCOUNT", "stgtestelogdiag")
-FILE_SHARE = _env("AZE_FILE_SHARE", "ari-bridge")
-SHARE_PATH = _env("AZE_SHARE_PATH", "AzureResourceInventory")
+STORAGE_ACCOUNT = _env("AZE_STORAGE_ACCOUNT", "")
+FILE_SHARE = _env("AZE_FILE_SHARE", "")
+SHARE_PATH = _env("AZE_SHARE_PATH", "")
 # Resource group of the storage account (used only by --auth-mode key to list
 # keys via ARM). Optional: the Azure CLI can resolve it from the account name.
 RESOURCE_GROUP = _env("AZE_RESOURCE_GROUP", "")
