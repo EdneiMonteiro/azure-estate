@@ -150,6 +150,21 @@ class _DirectAzureCliCredential:
         return AccessToken(token, int(expires_on))
 
 
+def _upload_credential():
+    """Credential used for OAuth (``login``) uploads.
+
+    When ``AZE_AUTH_MODE`` selects a managed identity (unattended runs on an
+    Azure VM) that credential is used directly: the CLI chain below would only
+    waste time failing, since no user is signed in. Otherwise the resilient
+    signed-in-user chain is used.
+    """
+    from azure_estate.auth import get_credential, is_managed_identity
+
+    if is_managed_identity():
+        return get_credential()
+    return _signed_in_user_credential()
+
+
 def _signed_in_user_credential() -> ChainedTokenCredential:
     """Credential for the signed-in user, resilient to broken shells and CA.
 
@@ -288,7 +303,7 @@ class FileShareUploader:
                 credential={"account_name": self._account_name, "account_key": key},
             )
 
-        credential = self._explicit_credential or _signed_in_user_credential()
+        credential = self._explicit_credential or _upload_credential()
         return ShareClient(
             account_url=account_url,
             share_name=self._share_name,

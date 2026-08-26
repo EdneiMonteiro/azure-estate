@@ -47,6 +47,11 @@ def _env(name: str, default: str = "") -> str:
 STORAGE_ACCOUNT = _env("AZE_STORAGE_ACCOUNT", "")
 FILE_SHARE = _env("AZE_FILE_SHARE", "")
 SHARE_PATH = _env("AZE_SHARE_PATH", "")
+# Upload destination: "share" (Azure File Share) or "blob" (Blob container).
+UPLOAD_TARGET = _env("AZE_UPLOAD_TARGET", "share").strip().lower()
+# Blob container and optional prefix (virtual folder), used by target "blob".
+BLOB_CONTAINER = _env("AZE_BLOB_CONTAINER", "")
+BLOB_PREFIX = _env("AZE_BLOB_PREFIX", "")
 # Resource group of the storage account (used only by --auth-mode key to list
 # keys via ARM). Optional: the Azure CLI can resolve it from the account name.
 RESOURCE_GROUP = _env("AZE_RESOURCE_GROUP", "")
@@ -55,3 +60,14 @@ RESOURCE_GROUP = _env("AZE_RESOURCE_GROUP", "")
 SUBSCRIPTION = _env("AZE_SUBSCRIPTION", "")
 # Default upload auth mode: "login" (Entra OAuth) or "key" (account key via ARM).
 UPLOAD_AUTH_MODE = _env("AZE_UPLOAD_AUTH_MODE", "login")
+
+# ---------------------------------------------------------------------------
+# Identity used to read Azure (and, with AZE_UPLOAD_AUTH_MODE=login, to write to
+# the file share):
+#   "cli"              — the signed-in Azure CLI user (default, local dev).
+#   "managed-identity" — the VM's managed identity via IMDS (unattended runs).
+#   "default"          — DefaultAzureCredential (tries env vars, MI, CLI, …).
+# For a user-assigned identity, also set AZE_CLIENT_ID to its client ID.
+# ---------------------------------------------------------------------------
+AUTH_MODE = _env("AZE_AUTH_MODE", "cli").strip().lower()
+CLIENT_ID = _env("AZE_CLIENT_ID", "")

@@ -38,11 +38,14 @@ Leia também:
 ## O que este exemplo demonstra
 
 - Coleta de recursos via Azure Resource Graph (`azure_estate/collectors/`)
-- Autenticação com `azure-identity` usando a identidade do usuário logado
-  (`AzureCliCredential`; `azure_estate/auth.py`)
+- Autenticação com `azure-identity`: usuário logado no Azure CLI, identidade
+  gerenciada da VM ou `DefaultAzureCredential` (`azure_estate/auth.py`)
 - Exportação para Excel com `openpyxl`/`pandas` (`azure_estate/exporters/`)
-- Envio dos relatórios para Azure File Share, via Microsoft Entra ID (OAuth) ou
-  chave de conta obtida por ARM (`azure_estate/exporters/file_share.py`)
+- Envio dos relatórios para Azure Storage via Microsoft Entra ID: container de
+  Blob (`azure_estate/exporters/blob.py`) ou File Share — este último também
+  aceita chave de conta obtida por ARM (`azure_estate/exporters/file_share.py`)
+- Execução agendada no Windows sem usuário logado, usando a identidade
+  gerenciada da VM (`scripts/`)
 - Relatórios extensíveis por registro (`azure_estate/reports/`):
   - `subscriptions` — assinaturas
   - `resource_groups` — grupos de recursos
@@ -52,8 +55,10 @@ Leia também:
 ## Pré-requisitos
 
 - Python 3.10+
-- Azure CLI instalado e autenticado (`az login`) — a coleta usa a identidade
-  do usuário logado (`AzureCliCredential`)
+- Azure CLI instalado e autenticado (`az login`) para uso interativo — a coleta
+  usa a identidade do usuário logado (`AzureCliCredential`). Em execução
+  agendada numa VM do Azure, use a identidade gerenciada (veja
+  [Execução recorrente no Windows](#execução-recorrente-no-windows-com-identidade-gerenciada))
 - Credenciais Azure com permissão de leitura nas assinaturas-alvo
 
 ## Como iniciar
@@ -76,42 +81,154 @@ Leia também:
    python main.py --report subscriptions # executa um relatório (saída em ./output/)
    python main.py --report all           # executa todos os relatórios de uma vez
    ```
-5. (Opcional) Envie os relatórios para um Azure File Share. Por padrão usa a
-   identidade Microsoft Entra do usuário logado (OAuth, sem chaves de conta):
+5. (Opcional) Envie os relatórios para o Azure Storage. O destino pode ser um
+   **container de Blob** ou um **Azure File Share**, sempre com identidade
+   Microsoft Entra (sem chaves de conta):
    ```bash
-   # Gera todos os relatórios e envia em seguida
-   python main.py --report all --upload
+   # Blob container (recomendado para execução agendada)
+   python main.py --report all --upload --upload-target blob \
+     --storage-account <conta> --container <container>
+
+   # Azure File Share
+   python main.py --report all --upload --upload-target share
 
    # Apenas envia os .xlsx já gerados em ./output/
    python main.py --upload
    ```
-   O destino padrão vem de `.env` (`AZE_STORAGE_ACCOUNT`, `AZE_FILE_SHARE`,
-   `AZE_SHARE_PATH`) e pode ser sobrescrito com `--storage-account`, `--share`
-   e `--share-path`. O usuário precisa do papel **Storage File Data Privileged
-   Contributor** na storage account, e a conta deve permitir autenticação
-   Microsoft Entra (OAuth) para file shares.
+   O destino padrão vem de `.env` (`AZE_UPLOAD_TARGET`, `AZE_STORAGE_ACCOUNT` e,
+   conforme o caso, `AZE_BLOB_CONTAINER`/`AZE_BLOB_PREFIX` ou `AZE_FILE_SHARE`/
+   `AZE_SHARE_PATH`).
+
+   Papéis necessários na storage account — **diferentes para cada destino**:
+
+   | Destino | Papel |
+   |---|---|
+   | Blob | **Storage Blob Data Contributor** |
+   | File Share | **Storage File Data Privileged Contributor** |
 
    No **Azure Cloud Shell**, o broker de token não consegue emitir tokens de
-   data-plane (`storage.azure.com`), então o modo OAuth falha. Use o modo de
-   chave (obtida via ARM), que funciona nesse ambiente e exige permissão para
-   listar chaves (Contributor / Storage Account Contributor):
+   data-plane (`storage.azure.com`), então o modo OAuth falha **para File
+   Share**. Use o modo de chave (obtida via ARM), que funciona nesse ambiente e
+   exige permissão para listar chaves (Contributor / Storage Account
+   Contributor):
    ```bash
-   python main.py --upload --auth-mode key \
+   python main.py --upload --upload-target share --auth-mode key \
      --subscription <sub-id> --resource-group <rg>
    ```
+   O destino **blob** não aceita `--auth-mode key`: ele usa sempre identidade
+   Entra.
 6. Valide o comportamento antes de qualquer adaptação
+
+## Execução recorrente no Windows com identidade gerenciada
+
+Para rodar sem usuário logado numa VM do Azure (Tarefa Agendada), a credencial
+vem do IMDS da VM — sem `az login`, sem chave, sem segredo em disco.
+
+### 1. Ativar a identidade gerenciada e conceder as permissões
+
+Ative a identidade **atribuída pelo sistema** na VM (é a que o script usa por
+padrão) e guarde o principal ID que o comando devolve:
+
+```powershell
+# Ativa a identidade do sistema e já retorna o principalId
+$principal = az vm identity assign -g <rg-da-vm> -n <vm> `
+  --query systemAssignedIdentity -o tsv
+
+# (Se ela já estiver ativa, apenas consulte:)
+# $principal = az vm identity show -g <rg-da-vm> -n <vm> --query principalId -o tsv
+```
+
+Conceda a ela:
+
+| Escopo | Papel | Para quê |
+|---|---|---|
+| Management Group / assinaturas-alvo | **Reader** | ler o inventário via Resource Graph |
+| Storage Account de destino | **Storage Blob Data Contributor** | gravar os `.xlsx` no container de blob |
+
+```powershell
+az role assignment create --assignee $principal --role "Reader" `
+  --scope /providers/Microsoft.Management/managementGroups/<mg-id>
+
+az role assignment create --assignee $principal `
+  --role "Storage Blob Data Contributor" `
+  --scope /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Storage/storageAccounts/<conta>
+```
+
+As atribuições levam alguns minutos para propagar.
+
+> Se o destino for **File Share** em vez de Blob, o papel é outro:
+> **Storage File Data Privileged Contributor**. Não são intercambiáveis.
+
+> Para usar uma identidade **atribuída pelo usuário** em vez da do sistema,
+> atribua-a à VM e preencha `AZE_CLIENT_ID` com o *client ID* dela. Se a VM tiver
+> mais de uma identidade, `AZE_CLIENT_ID` é obrigatório: o IMDS não adivinha.
+
+### 2. Configurar o `.env` na VM
+
+```ini
+AZURE_TENANT_ID=<tenant-id>
+AZE_AUTH_MODE=managed-identity
+# Identidade do SISTEMA (caso mais comum): deixe AZE_CLIENT_ID vazio.
+# Identidade ATRIBUÍDA PELO USUÁRIO: preencha com o client ID dela.
+AZE_CLIENT_ID=
+
+AZE_UPLOAD_TARGET=blob
+AZE_STORAGE_ACCOUNT=<conta>
+AZE_BLOB_CONTAINER=<container>
+AZE_BLOB_PREFIX=azure-estate
+```
+
+> Para File Share, use `AZE_UPLOAD_TARGET=share` com `AZE_FILE_SHARE` e
+> `AZE_SHARE_PATH`. Nesse caso, `AZE_UPLOAD_AUTH_MODE=key` **não** funciona com
+> identidade gerenciada: esse modo lista a chave da conta pelo Azure CLI, que
+> exige um usuário logado. O destino blob nunca usa chave.
+
+### 3. Testar manualmente antes de agendar
+
+```powershell
+.\scripts\Run-AzureEstate.ps1 -Report resource_details -UploadTarget blob
+```
+
+O script grava em `output\<data>-<hora>\`, envia os `.xlsx` ao destino escolhido
+e registra tudo em `logs\azure-estate_<data>.log`. Ele retorna código diferente
+de zero se o Python falhar **ou** se nenhum `.xlsx` for gerado — sem isso a
+tarefa apareceria como bem-sucedida para sempre.
+
+### 4. Registrar a Tarefa Agendada
+
+Em um PowerShell **elevado**:
+
+```powershell
+# Diariamente às 03:00, enviando para o container de blob
+.\scripts\Install-AzureEstateTask.ps1 -At 03:00 -UploadTarget blob
+
+# Ou toda segunda-feira às 06:30, com todos os relatórios
+.\scripts\Install-AzureEstateTask.ps1 -At 06:30 -Weekly Monday -Report all
+```
+
+A tarefa roda como **SYSTEM** com "executar mesmo sem usuário logado" (o IMDS é
+um endpoint de rede local, acessível ao SYSTEM) e nenhuma senha é armazenada.
+
+```powershell
+Start-ScheduledTask   -TaskName "AzureEstate-ResourceDetails"   # testar agora
+Get-ScheduledTaskInfo -TaskName "AzureEstate-ResourceDetails"   # último resultado
+```
 
 ## Estrutura
 
 ```
 azure_estate/
-  auth.py              # autenticação Azure (AzureCliCredential)
-  config.py            # configuração (tenant, destino de upload)
+  auth.py              # autenticação Azure (CLI, identidade gerenciada, default)
+  config.py            # configuração (tenant, identidade, destino de upload)
   collectors/          # coleta via Resource Graph
-  exporters/           # exportação: Excel + upload para File Share
+  exporters/           # exportação: Excel + upload para Azure Storage
     excel.py           #   geração dos .xlsx (com gráficos)
+    blob.py            #   envio para container de Blob (Entra ID)
     file_share.py      #   envio para Azure File Share (OAuth ou chave)
   reports/             # relatórios registrados
+scripts/
+  Run-AzureEstate.ps1        # execução não assistida (gera, envia, registra log)
+  Install-AzureEstateTask.ps1 # registra a Tarefa Agendada do Windows
 main.py                # CLI
 ```
 
