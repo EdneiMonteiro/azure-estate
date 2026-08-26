@@ -7,13 +7,30 @@ Each ResourceTypeConfig describes:
                   The KQL expression is evaluated inside a Resource Graph
                   `extend` clause and should be null-safe (use tostring(),
                   coalesce(), iff(), etc.).
+- raw_columns   : optional (key, KQL_expression) pairs fetched from the Graph
+                  but NOT exported.  Use them to bring nested arrays/objects
+                  (e.g. AKS agent pool profiles) into `derive`.
+- derive        : optional callable receiving a dict of the `raw_columns`
+                  values and returning either {display_name: value} (one row)
+                  or a list of such dicts (one row per nested item — this is
+                  how ARI renders a line per AKS node pool, NSG rule, etc.).
+                  It flattens what KQL cannot: Azure Resource Graph rejects
+                  `mv-apply`, and `mv-expand` cannot be expressed per-config.
+- derived       : ordered display names produced by `derive`; they are
+                  appended after `columns` in the sheet.
 
 Base columns (Subscription, Resource Group, Nome, Região) are added
 automatically by the collector — do NOT include them here.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+import re
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
+from typing import Any
+
+from azure_estate.ari_specs import ARI_SPECS
 
 
 @dataclass(frozen=True)
@@ -21,6 +38,9 @@ class ResourceTypeConfig:
     resource_type: str
     sheet_name: str
     columns: list[tuple[str, str]]
+    raw_columns: list[tuple[str, str]] = field(default_factory=list)
+    derived: list[str] = field(default_factory=list)
+    derive: Callable[[dict[str, Any]], dict[str, Any] | list[dict[str, Any]]] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -32,7 +52,9 @@ _VM = ResourceTypeConfig(
     columns=[
         ("Tamanho",             "tostring(properties.hardwareProfile.vmSize)"),
         ("OS",                  "tostring(properties.storageProfile.osDisk.osType)"),
+        ("Imagem",              "iff(isnotempty(properties.storageProfile.imageReference.publisher), strcat(tostring(properties.storageProfile.imageReference.publisher), '/', tostring(properties.storageProfile.imageReference.offer), '/', tostring(properties.storageProfile.imageReference.sku)), tostring(properties.storageProfile.imageReference.id))"),
         ("Disco OS (GB)",       "tostring(properties.storageProfile.osDisk.diskSizeGB)"),
+        ("Disco OS SKU",        "tostring(properties.storageProfile.osDisk.managedDisk.storageAccountType)"),
         ("Qtd. Discos Dados",   "tostring(array_length(properties.storageProfile.dataDisks))"),
         ("Zonas",               "tostring(zones)"),
         ("Availability Set",    "tostring(properties.availabilitySet.id)"),
@@ -44,7 +66,7 @@ _VMSS = ResourceTypeConfig(
     resource_type="microsoft.compute/virtualmachinescalesets",
     sheet_name="VM Scale Sets",
     columns=[
-        ("Tamanho",          "tostring(properties.virtualMachineProfile.hardwareProfile.vmSize)"),
+        ("Tamanho",          "tostring(coalesce(tostring(sku.name), tostring(properties.virtualMachineProfile.hardwareProfile.vmSize)))"),
         ("Capacidade",       "tostring(sku.capacity)"),
         ("Modo",             "tostring(properties.orchestrationMode)"),
         ("Upgrade Policy",   "tostring(properties.upgradePolicy.mode)"),
@@ -67,20 +89,110 @@ _DISK = ResourceTypeConfig(
     ],
 )
 
+# --- AKS node pool flattening -----------------------------------------------
+# Azure Resource Graph rejects `mv-apply`, and `mv-expand` would emit one row
+# per node pool, so the array is projected raw and summarised here.
+_AKS_POOL_COLUMNS = [
+    "Node Pools",
+    "Tamanhos de Nó",
+    "Total de Nós",
+    "Autoscale",
+    "Modo Node Pool",
+    "OS dos Nós",
+    "Disco OS Nós (GB)",
+    "Max Pods",
+]
+
+
+def _as_list(value: Any) -> list[dict[str, Any]]:
+    """Coerce a Resource Graph dynamic column into a list of dicts."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value) if value.strip() else []
+        except ValueError:
+            return []
+    if isinstance(value, dict):
+        value = [value]
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _uniq(values: list[Any]) -> str:
+    """Join distinct, non-empty values preserving first-seen order."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for v in values:
+        if v is None or v == "":
+            continue
+        s = str(v)
+        if s not in seen:
+            seen.add(s)
+            out.append(s)
+    return ", ".join(out)
+
+
+def _derive_aks_pools(raw: dict[str, Any]) -> dict[str, Any]:
+    """Summarise properties.agentPoolProfiles into report-friendly columns."""
+    pools = _as_list(raw.get("agentPoolProfiles"))
+
+    descriptions: list[str] = []
+    total_nodes = 0
+    autoscale = False
+    for pool in pools:
+        size = pool.get("vmSize") or "?"
+        count = pool.get("count")
+        desc = f"{pool.get('name') or '?'}: {size} x{count if count is not None else '?'}"
+        if pool.get("enableAutoScaling"):
+            autoscale = True
+            desc += f" (auto {pool.get('minCount')}-{pool.get('maxCount')})"
+        if pool.get("scaleSetPriority"):
+            desc += f" [{pool['scaleSetPriority']}]"
+        descriptions.append(desc)
+        if isinstance(count, (int, float)):
+            total_nodes += int(count)
+
+    os_labels = [
+        f"{p.get('osType')}/{p['osSKU']}" if p.get("osSKU") else str(p.get("osType") or "")
+        for p in pools
+    ]
+
+    return {
+        "Node Pools":        " | ".join(descriptions),
+        "Tamanhos de Nó":    _uniq([p.get("vmSize") for p in pools]),
+        "Total de Nós":      total_nodes if pools else "",
+        "Autoscale":         ("Sim" if autoscale else "Não") if pools else "",
+        "Modo Node Pool":    _uniq([p.get("mode") for p in pools]),
+        "OS dos Nós":        _uniq(os_labels),
+        "Disco OS Nós (GB)": _uniq([p.get("osDiskSizeGB") for p in pools]),
+        "Max Pods":          _uniq([p.get("maxPods") for p in pools]),
+    }
+
+
 _AKS = ResourceTypeConfig(
     resource_type="microsoft.containerservice/managedclusters",
     sheet_name="AKS",
     columns=[
         ("Versão K8s",       "tostring(properties.kubernetesVersion)"),
         ("SKU Tier",         "tostring(sku.tier)"),
+        ("Power State",      "tostring(properties.powerState.code)"),
         ("Qtd. Node Pools",  "tostring(array_length(properties.agentPoolProfiles))"),
         ("Network Plugin",   "tostring(properties.networkProfile.networkPlugin)"),
         ("Network Policy",   "tostring(properties.networkProfile.networkPolicy)"),
+        ("Load Balancer SKU","tostring(properties.networkProfile.loadBalancerSku)"),
+        ("Outbound Type",    "tostring(properties.networkProfile.outboundType)"),
         ("Cluster Privado",  "tostring(properties.apiServerAccessProfile.enablePrivateCluster)"),
         ("RBAC",             "tostring(properties.enableRBAC)"),
         ("OIDC Issuer",      "tostring(properties.oidcIssuerProfile.enabled)"),
         ("Workload Identity","tostring(properties.securityProfile.workloadIdentity.enabled)"),
+        ("Auto Upgrade",     "tostring(properties.autoUpgradeProfile.upgradeChannel)"),
+        ("Identidade",       "tostring(identity.type)"),
+        ("Node Resource Group", "tostring(properties.nodeResourceGroup)"),
+        ("FQDN",             "tostring(properties.fqdn)"),
     ],
+    raw_columns=[("agentPoolProfiles", "properties.agentPoolProfiles")],
+    derived=_AKS_POOL_COLUMNS,
+    derive=_derive_aks_pools,
 )
 
 _ACR = ResourceTypeConfig(
@@ -589,7 +701,7 @@ _SYNAPSE = ResourceTypeConfig(
 # ---------------------------------------------------------------------------
 # Ordered registry — defines report tab order
 # ---------------------------------------------------------------------------
-RESOURCE_CONFIGS: list[ResourceTypeConfig] = [
+_CURATED: list[ResourceTypeConfig] = [
     _VM,
     _VMSS,
     _DISK,
@@ -631,6 +743,206 @@ RESOURCE_CONFIGS: list[ResourceTypeConfig] = [
     _ML,
     _SYNAPSE,
 ]
+
+
+# ---------------------------------------------------------------------------
+# ARI parity layer
+#
+# azure_estate/ari_specs.py mirrors the field selection of every microsoft/ARI
+# inventory module.  Curated configs keep their Portuguese column names and
+# their position; ARI columns whose property path is already covered by a
+# curated column are dropped, the rest are appended.
+# ---------------------------------------------------------------------------
+_PATH_RE = re.compile(
+    r"\b((?:properties|sku|identity|plan|kind|zones|managedBy)"
+    r"(?:\.\w+|\['[^']+'\])*)"
+)
+
+
+def _paths_in(expression: str) -> set[str]:
+    """Property paths an extend expression reads, normalised for comparison.
+
+    Both dotted access and string indexing are accepted so a curated
+    ``properties.sku.name`` matches a generated ``properties['sku']['name']``.
+    """
+    return {
+        re.sub(r"\['([^']+)'\]", r".\1", m).lower() for m in _PATH_RE.findall(expression)
+    }
+
+
+def _as_kql(path: str) -> str:
+    """Render a property path as string indexing, immune to KQL keywords."""
+    head, *rest = path.split(".")
+    return head + "".join(f"['{p}']" for p in rest)
+
+
+def _dig(value: Any, subpath: str) -> list[Any]:
+    """Walk *subpath* through dicts, expanding any array transparently.
+
+    PowerShell returns every item's value when a property is read off an array,
+    and ARI's paths rely on that; this reproduces it for the JSON that Resource
+    Graph returns.
+    """
+    current: list[Any] = [value]
+    for part in filter(None, subpath.split(".")):
+        following: list[Any] = []
+        for item in current:
+            if isinstance(item, list):
+                following.extend(
+                    sub.get(part) for sub in item if isinstance(sub, dict) and part in sub
+                )
+            elif isinstance(item, dict) and part in item:
+                following.append(item[part])
+        current = following
+    flat: list[Any] = []
+    for item in current:
+        flat.extend(item) if isinstance(item, list) else flat.append(item)
+    return [v for v in flat if v is not None and v != ""]
+
+
+def _format(values: list[Any], status: str) -> str:
+    if status == "contagem":
+        return str(len(values))
+    if status.startswith("split"):
+        index = int(status.split(":")[1])
+        parts = [str(v).split("/") for v in values]
+        return _uniq([p[index] for p in parts if len(p) > index])
+    return _uniq(values)
+
+
+def _coerce(value: Any) -> Any:
+    """Resource Graph hands dynamic columns back as JSON text sometimes."""
+    if isinstance(value, str) and value[:1] in ("[", "{"):
+        try:
+            return json.loads(value)
+        except ValueError:
+            return value
+    return value
+
+
+def _make_ari_derive(
+    multi: list[list[str]],
+    axis_key: str | None,
+    axis_columns: list[list[str]],
+) -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
+    """Build the `derive` callable for one ARI spec.
+
+    `multi` columns collapse an array into a comma-separated cell; the explode
+    axis, when present, turns each array item into its own row — the way ARI
+    renders one line per node pool or security rule.
+    """
+
+    def derive(raw: dict[str, Any]) -> list[dict[str, Any]]:
+        shared = {
+            name: _format(_dig(_coerce(raw.get(f"a{i}")), subpath), status)
+            for i, (name, _root, subpath, status) in enumerate(multi)
+        }
+        if not axis_key:
+            return [shared]
+        items = _as_list(raw.get("axis"))
+        if not items:
+            return [{**shared, **{name: "" for name, _s, _st in axis_columns}}]
+        return [
+            {
+                **shared,
+                **{
+                    name: _format(_dig(item, subpath), status)
+                    for name, subpath, status in axis_columns
+                },
+            }
+            for item in items
+        ]
+
+    return derive
+
+
+def _config_from_ari(spec: dict[str, Any], curated: ResourceTypeConfig | None) -> ResourceTypeConfig:
+    columns = list(curated.columns) if curated else []
+    raw_columns = list(curated.raw_columns) if curated else []
+    derived = list(curated.derived) if curated else []
+    taken_paths = {p for _n, e in columns for p in _paths_in(e)}
+    taken_names = {n for n, _e in columns} | set(derived)
+
+    for name, expression in spec["columns"]:
+        paths = _paths_in(expression)
+        if name in taken_names or (paths and paths & taken_paths):
+            continue
+        taken_names.add(name)
+        taken_paths |= paths
+        columns.append((name, expression))
+
+    multi = [m for m in spec.get("multi", []) if m[0] not in taken_names]
+    axis_key, axis_columns = spec.get("explode", (None, []))
+    axis_columns = [c for c in axis_columns if c[0] not in taken_names]
+
+    if multi or axis_columns:
+        for i, (_name, root, _sub, _st) in enumerate(multi):
+            raw_columns.append((f"a{i}", _as_kql(root)))
+        if axis_key and axis_columns:
+            raw_columns.append(("axis", _as_kql(axis_key)))
+        else:
+            axis_key = None
+        derived += [m[0] for m in multi] + [c[0] for c in axis_columns]
+        inner = _make_ari_derive(multi, axis_key, axis_columns)
+        previous = curated.derive if curated else None
+        if previous is None:
+            combined = inner
+        else:
+            def combined(raw: dict[str, Any], _prev=previous, _inner=inner) -> list[dict[str, Any]]:
+                before = _prev(raw)
+                before = [before] if isinstance(before, dict) else list(before)
+                return [{**b, **row} for b in before for row in _inner(raw)]
+    else:
+        combined = curated.derive if curated else None
+
+    return ResourceTypeConfig(
+        resource_type=spec["type"],
+        sheet_name=curated.sheet_name if curated else spec["sheet"],
+        columns=columns,
+        raw_columns=raw_columns,
+        derived=derived,
+        derive=combined,
+    )
+
+
+def _build_registry() -> list[ResourceTypeConfig]:
+    curated_by_type = {c.resource_type: c for c in _CURATED}
+    specs_by_type = {s["type"]: s for s in ARI_SPECS}
+    registry: list[ResourceTypeConfig] = []
+    for config in _CURATED:
+        spec = specs_by_type.get(config.resource_type)
+        registry.append(_config_from_ari(spec, config) if spec else config)
+    for spec in ARI_SPECS:
+        if spec["type"] not in curated_by_type:
+            registry.append(_config_from_ari(spec, None))
+    return _dedupe_sheets(registry)
+
+
+def _dedupe_sheets(registry: list[ResourceTypeConfig]) -> list[ResourceTypeConfig]:
+    """Give every config a distinct sheet name.
+
+    A single ARI module can own several resource types (they share one sheet
+    there); here each type gets its own tab, so the clash is broken with the
+    type's last path segment.
+    """
+    taken: set[str] = set()
+    out: list[ResourceTypeConfig] = []
+    for config in registry:
+        name = config.sheet_name[:31]
+        if name in taken:
+            suffix = config.resource_type.rsplit("/", 1)[-1]
+            name = f"{config.sheet_name[:30 - len(suffix)]} {suffix}"[:31]
+            n = 2
+            while name in taken:
+                name = f"{config.sheet_name[:29]} {n}"[:31]
+                n += 1
+            config = replace(config, sheet_name=name)
+        taken.add(name)
+        out.append(config)
+    return out
+
+
+RESOURCE_CONFIGS: list[ResourceTypeConfig] = _build_registry()
 
 # Lookup by resource type (lowercase)
 CONFIGS_BY_TYPE: dict[str, ResourceTypeConfig] = {

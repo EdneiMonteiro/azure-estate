@@ -8,6 +8,31 @@ from openpyxl.chart import PieChart, Reference
 from openpyxl.chart.label import DataLabelList
 from openpyxl.chart.series import DataPoint
 
+# Excel refuses any cell longer than this; openpyxl would silently truncate it.
+_MAX_CELL = 32767
+_ELLIPSIS = "… (truncado)"
+
+
+def _clip_cells(df: pd.DataFrame) -> pd.DataFrame:
+    """Shorten oversized text cells, flagging that content was cut.
+
+    Flattened arrays (a firewall's address list, a cluster's labels) can run to
+    hundreds of thousands of characters.
+    """
+    out = df.copy()
+    for column in out.columns:
+        values = out[column]
+        if pd.api.types.is_numeric_dtype(values) or pd.api.types.is_bool_dtype(values):
+            continue
+        text = values.astype(str)
+        if not (text.str.len() > _MAX_CELL).any():
+            continue
+        out[column] = text.mask(
+            text.str.len() > _MAX_CELL,
+            text.str.slice(0, _MAX_CELL - len(_ELLIPSIS)) + _ELLIPSIS,
+        )
+    return out
+
 
 class ExcelExporter:
     """Saves one or more DataFrames as sheets in an Excel workbook."""
@@ -79,7 +104,7 @@ class ExcelExporter:
                 if df is None or df.empty:
                     continue
                 safe_name = sheet_name[:31]
-                df.to_excel(writer, index=False, sheet_name=safe_name)
+                _clip_cells(df).to_excel(writer, index=False, sheet_name=safe_name)
                 self._auto_fit(writer.sheets[safe_name])
 
         return path

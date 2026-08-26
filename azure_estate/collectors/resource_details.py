@@ -17,17 +17,26 @@ _BASE_COLUMNS = [
     ("Região",          "location"),
 ]
 
+# Working columns kept on the DataFrame for the enrichment step; they are
+# dropped before export.
+_ID = "_resource_id"
+_SUB_ID = "_subscription_id"
+INTERNAL_COLUMNS = (_ID, _SUB_ID)
+
 
 def _build_kql(config: ResourceTypeConfig) -> str:
     """Build the KQL query for a given resource type config."""
     # Build extend clause for each specific column
     extend_parts = ", ".join(
-        f"_c{i} = {expr}"
-        for i, (_, expr) in enumerate(config.columns)
+        [f"_c{i} = {expr}" for i, (_, expr) in enumerate(config.columns)]
+        + [f"_r{i} = {expr}" for i, (_, expr) in enumerate(config.raw_columns)]
     )
 
     # Specific projected fields
-    specific_fields = ", ".join(f"_c{i}" for i in range(len(config.columns)))
+    specific_fields = ", ".join(
+        [f"_c{i}" for i in range(len(config.columns))]
+        + [f"_r{i}" for i in range(len(config.raw_columns))]
+    )
 
     kql = (
         f"Resources\n"
@@ -38,24 +47,41 @@ def _build_kql(config: ResourceTypeConfig) -> str:
         f"    | where type == 'microsoft.resources/subscriptions'\n"
         f"    | project subscriptionId, _subName = name\n"
         f") on subscriptionId\n"
-        f"| project _subName, resourceGroup, name, location"
+        f"| project _subName, subscriptionId, _id = tolower(id), resourceGroup, name, location"
         + (f", {specific_fields}" if specific_fields else "")
     )
 
     return kql
 
 
-def _rename_row(row: dict[str, Any], config: ResourceTypeConfig) -> dict[str, Any]:
-    """Rename raw KQL output keys to display names."""
-    result: dict[str, Any] = {
+def _rename_row(row: dict[str, Any], config: ResourceTypeConfig) -> list[dict[str, Any]]:
+    """Rename raw KQL output keys to display names.
+
+    Returns one dict per output row: `derive` may expand a single resource
+    into several rows (one per node pool, security rule, …).
+    """
+    base: dict[str, Any] = {
         "Subscription":   row.get("_subName", ""),
         "Resource Group": row.get("resourceGroup", ""),
         "Nome":           row.get("name", ""),
         "Região":         row.get("location", ""),
+        _ID:              row.get("_id", ""),
+        _SUB_ID:          row.get("subscriptionId", ""),
     }
     for i, (col_name, _) in enumerate(config.columns):
-        result[col_name] = row.get(f"_c{i}", "")
-    return result
+        base[col_name] = row.get(f"_c{i}", "")
+
+    if config.derive is None:
+        return [base]
+
+    raw = {key: row.get(f"_r{i}") for i, (key, _) in enumerate(config.raw_columns)}
+    derived = config.derive(raw)
+    if isinstance(derived, dict):
+        derived = [derived]
+    if not derived:
+        derived = [{}]
+
+    return [{**base, **extra} for extra in derived]
 
 
 def query_resource_type(
@@ -78,13 +104,15 @@ def query_resource_type(
     if not raw:
         return pd.DataFrame()
 
-    rows = [_rename_row(r, config) for r in raw]
+    rows = [r for raw_row in raw for r in _rename_row(raw_row, config)]
     df = pd.DataFrame(rows)
 
     # Ensure column order: base cols first, then specific cols
     ordered_cols = (
         ["Subscription", "Resource Group", "Nome", "Região"]
         + [col_name for col_name, _ in config.columns]
+        + list(config.derived)
+        + list(INTERNAL_COLUMNS)
     )
     # Only keep columns that actually exist in the DataFrame
     df = df[[c for c in ordered_cols if c in df.columns]]
