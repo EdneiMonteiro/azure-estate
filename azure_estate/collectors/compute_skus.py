@@ -72,8 +72,11 @@ def fetch_sku_catalog(
             return region, []
 
     catalog: dict[tuple[str, str], dict[str, str]] = {}
+    falhas: list[str] = []
     with ThreadPoolExecutor(max_workers=workers) as pool:
         for region, skus in pool.map(one, regions):
+            if not skus:
+                falhas.append(region)
             for sku in skus:
                 if sku.get("resourceType") != "virtualMachines":
                     continue
@@ -86,6 +89,15 @@ def fetch_sku_catalog(
                 row["VM Family"] = sku.get("family", "")
                 row["Zones Available in the Region"] = _zones(sku, region)
                 catalog[(region, str(sku.get("name", "")).lower())] = row
+    if falhas:
+        # Without this the SKU columns come back empty and look like a data gap
+        # rather than a failed lookup.
+        print(
+            f"\n  [AVISO] catálogo de SKUs vazio em {len(falhas)} região(ões): "
+            f"{', '.join(sorted(falhas)[:5])}"
+            f"{' …' if len(falhas) > 5 else ''}",
+            end="",
+        )
     return catalog
 
 
@@ -112,11 +124,23 @@ def fetch_quota(
             return pair, []
 
     quota: dict[tuple[str, str, str], str] = {}
+    vazios = 0
     with ThreadPoolExecutor(max_workers=workers) as pool:
         for (sub, region), usages in pool.map(one, pairs):
+            if not usages:
+                vazios += 1
             for usage in usages:
                 family = str(usage.get("name", {}).get("value", "")).lower()
                 limit, current = usage.get("limit"), usage.get("currentValue")
                 if family and limit is not None and current is not None:
                     quota[(sub, region, family)] = str(limit - current)
+    if vazios:
+        # Some subscriptions genuinely have no Compute provider registered, so
+        # this is a warning, not an error — but a silent zero would hide a
+        # throttled or failed run behind an empty column.
+        print(
+            f"\n  [AVISO] cota indisponível em {vazios} de {len(pairs)} par(es) "
+            "assinatura/região (provider não registrado ou consulta falhou)",
+            end="",
+        )
     return quota
