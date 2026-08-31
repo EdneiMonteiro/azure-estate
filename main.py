@@ -5,11 +5,14 @@ Usage examples
 # List all available reports
 python main.py --list
 
-# Run a specific report (output goes to ./output/ by default)
+# Run a specific report (output goes to ./output/ by default, as .xlsx + .csv)
 python main.py --report subscriptions
 
 # Run every report at once
 python main.py --report all
+
+# Pick the output format: xlsx, csv or both (default)
+python main.py --report all --format csv
 
 # Specify a custom output directory
 python main.py --report subscriptions --output /tmp/azure-estate
@@ -20,14 +23,16 @@ from __future__ import annotations
 import argparse
 import sys
 
-from azure_estate.exporters.excel import ExcelExporter
 from azure_estate.reports import REPORT_REGISTRY
+from azure_estate.reports.base import FORMATS
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    from azure_estate.config import CSV_DELIMITER, OUTPUT_FORMAT
+
     parser = argparse.ArgumentParser(
         prog="azure-estate",
-        description="Azure Resource Inventory — generate Excel reports from Azure.",
+        description="Azure Resource Inventory — generate Excel/CSV reports from Azure.",
     )
     parser.add_argument(
         "--report",
@@ -43,15 +48,35 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--output",
         metavar="DIR",
         default="output",
-        help="Directory where the Excel file will be saved (default: ./output/).",
+        help="Directory where the report files will be saved (default: ./output/).",
+    )
+    parser.add_argument(
+        "--format",
+        dest="format",
+        choices=list(FORMATS),
+        default=(OUTPUT_FORMAT if OUTPUT_FORMAT in FORMATS else "both"),
+        help=(
+            "Output format: 'xlsx' (Excel only), 'csv' (CSV only) or 'both' "
+            "(default: AZE_OUTPUT_FORMAT or both). Multi-sheet reports produce "
+            "one CSV per sheet."
+        ),
+    )
+    parser.add_argument(
+        "--csv-delimiter",
+        metavar="CHAR",
+        default=CSV_DELIMITER,
+        help=(
+            "Field separator for CSV output (default: AZE_CSV_DELIMITER or ','). "
+            "Use ';' for Excel in pt-BR locales."
+        ),
     )
     parser.add_argument(
         "--upload",
         action="store_true",
         help=(
-            "Upload the generated .xlsx reports from the output directory to "
-            "Azure Storage (File Share or Blob container) using a Microsoft "
-            "Entra identity."
+            "Upload the generated reports (.xlsx and .csv) from the output "
+            "directory to Azure Storage (File Share or Blob container) using a "
+            "Microsoft Entra identity."
         ),
     )
     parser.add_argument(
@@ -179,7 +204,10 @@ def _upload_to_blob(args: argparse.Namespace, account: str) -> int:
         return 1
 
     if not uploaded:
-        print(f"[AzEstate] No .xlsx files found in '{args.output}'. Nothing uploaded.")
+        print(
+            f"[AzEstate] No .xlsx/.csv files found in '{args.output}'. "
+            "Nothing uploaded."
+        )
         return 0
 
     print(f"[AzEstate] Uploaded {len(uploaded)} blob(s):")
@@ -296,7 +324,10 @@ def _upload_reports(args: argparse.Namespace) -> int:
         return 1
 
     if not uploaded:
-        print(f"[AzEstate] No .xlsx files found in '{args.output}'. Nothing uploaded.")
+        print(
+            f"[AzEstate] No .xlsx/.csv files found in '{args.output}'. "
+            "Nothing uploaded."
+        )
         return 0
 
     print(f"[AzEstate] Uploaded {len(uploaded)} file(s):")
@@ -305,22 +336,23 @@ def _upload_reports(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_report(report_name: str, output_dir: str) -> None:
-    """Run a single report by name and write its Excel output."""
+def _run_report(
+    report_name: str,
+    output_dir: str,
+    fmt: str = "both",
+    csv_delimiter: str = ",",
+) -> None:
+    """Run a single report by name and write its output file(s)."""
     report_cls = REPORT_REGISTRY[report_name]
     report = report_cls()
 
     print(f"[AzEstate] Running report: {report_name}")
     df = report.run()
 
-    # Reports may override export() to produce richer workbooks (e.g. with charts)
-    if hasattr(report, "export"):
-        report.export(df, output_dir=output_dir)
-    else:
-        exporter = ExcelExporter(output_dir=output_dir)
-        path = exporter.save(df, sheet_name=report.name)
-        print(f"[AzEstate] Done. File saved to: {path.resolve()}")
-        print(f"      Rows exported: {len(df)}")
+    # Reports may override export() to produce richer output (charts, sheets)
+    report.export(
+        df, output_dir=output_dir, fmt=fmt, csv_delimiter=csv_delimiter
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -341,7 +373,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if report_name == "all":
             for name in REPORT_REGISTRY:
-                _run_report(name, args.output)
+                _run_report(name, args.output, args.format, args.csv_delimiter)
         elif report_name not in REPORT_REGISTRY:
             print(
                 f"[ERROR] Unknown report '{report_name}'. "
@@ -349,7 +381,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
         else:
-            _run_report(report_name, args.output)
+            _run_report(report_name, args.output, args.format, args.csv_delimiter)
 
     if args.upload:
         return _upload_reports(args)

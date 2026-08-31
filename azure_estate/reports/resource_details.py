@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pathlib
 from datetime import date
 
 import pandas as pd
@@ -10,8 +11,9 @@ from azure_estate.collectors.resource_details import query_resource_type
 from azure_estate.collectors.subscriptions import list_active_subscriptions
 from azure_estate.config import TENANT_ID
 from azure_estate.enrich import Enricher
+from azure_estate.exporters.csv_exporter import CsvExporter
 from azure_estate.exporters.excel import ExcelExporter
-from azure_estate.reports.base import BaseReport
+from azure_estate.reports.base import BaseReport, wants_csv, wants_excel
 from azure_estate.resource_type_configs import RESOURCE_CONFIGS
 
 # Only regions where compute actually exists are worth a SKU/quota round-trip.
@@ -49,7 +51,13 @@ class ResourceDetailReport(BaseReport):
         # run() is not used for this report — export() drives everything
         return pd.DataFrame()
 
-    def export(self, df: pd.DataFrame, output_dir: str = "output") -> None:
+    def export(
+        self,
+        df: pd.DataFrame,
+        output_dir: str = "output",
+        fmt: str = "both",
+        csv_delimiter: str = ",",
+    ) -> None:
         credential = get_credential()
 
         print("  Fetching active subscriptions…")
@@ -87,11 +95,21 @@ class ResourceDetailReport(BaseReport):
             return
 
         today = date.today().strftime("%Y%m%d")
-        filename = f"resource_details_{today}.xlsx"
+        paths: list[pathlib.Path] = []
 
-        exporter = ExcelExporter(output_dir=output_dir)
-        path = exporter.save_multi_sheet(sheets, filename)
+        if wants_excel(fmt):
+            exporter = ExcelExporter(output_dir=output_dir)
+            paths.append(
+                exporter.save_multi_sheet(sheets, f"resource_details_{today}.xlsx")
+            )
 
-        total_rows = sum(len(df) for _, df in sheets)
-        print(f"\n[AzEstate] Done. File saved to: {path.resolve()}")
+        if wants_csv(fmt):
+            # A CSV holds a single table: one file per sheet.
+            csv_exporter = CsvExporter(output_dir=output_dir, delimiter=csv_delimiter)
+            paths.extend(csv_exporter.save_tables(sheets, prefix=self.name))
+
+        total_rows = sum(len(sheet_df) for _, sheet_df in sheets)
+        print("\n[AzEstate] Done. File(s) saved:")
+        for path in paths:
+            print(f"      - {path.resolve()}")
         print(f"      Sheets: {len(sheets)}  |  Total rows: {total_rows}")

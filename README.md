@@ -9,8 +9,9 @@
 
 Este repositório contém código de exemplo / prova de conceito (PoC) com o objetivo
 de demonstrar como inventariar todo o *estate* de recursos do Azure via **Azure
-Resource Graph** e gerar relatórios em **Excel** (assinaturas, grupos de recursos,
-tipos de recurso e detalhes de recursos), utilizando Python e Azure Identity.
+Resource Graph** e gerar relatórios em **Excel e CSV** (assinaturas, grupos de
+recursos, tipos de recurso e detalhes de recursos), utilizando Python e Azure
+Identity.
 
 Este projeto foi criado para fins de aprendizado, avaliação e experimentação.
 
@@ -40,7 +41,8 @@ Leia também:
 - Coleta de recursos via Azure Resource Graph (`azure_estate/collectors/`)
 - Autenticação com `azure-identity`: usuário logado no Azure CLI, identidade
   gerenciada da VM ou `DefaultAzureCredential` (`azure_estate/auth.py`)
-- Exportação para Excel com `openpyxl`/`pandas` (`azure_estate/exporters/`)
+- Exportação para Excel com `openpyxl`/`pandas` e para CSV com `pandas`
+  (`azure_estate/exporters/`)
 - Envio dos relatórios para Azure Storage via Microsoft Entra ID: container de
   Blob (`azure_estate/exporters/blob.py`) ou File Share — este último também
   aceita chave de conta obtida por ARM (`azure_estate/exporters/file_share.py`)
@@ -81,6 +83,17 @@ Leia também:
    python main.py --report subscriptions # executa um relatório (saída em ./output/)
    python main.py --report all           # executa todos os relatórios de uma vez
    ```
+   Por padrão cada relatório é gravado em **`.xlsx` e `.csv`**. Use `--format`
+   para escolher apenas um deles (ou defina `AZE_OUTPUT_FORMAT` no `.env`):
+   ```bash
+   python main.py --report all --format csv    # só CSV
+   python main.py --report all --format xlsx   # só Excel (comportamento antigo)
+   python main.py --report all --csv-delimiter ";"   # Excel em pt-BR
+   ```
+   Um CSV guarda uma única tabela: o relatório `resource_details`, que é
+   multi-abas, gera um arquivo por aba
+   (`resource_details_<aba>_<data>.csv`). O CSV é gravado em `utf-8-sig` —
+   sem o BOM, o Excel no Windows lê acentos como Latin-1 e os corrompe.
 5. (Opcional) Envie os relatórios para o Azure Storage. O destino pode ser um
    **container de Blob** ou um **Azure File Share**, sempre com identidade
    Microsoft Entra (sem chaves de conta):
@@ -92,7 +105,7 @@ Leia também:
    # Azure File Share
    python main.py --report all --upload --upload-target share
 
-   # Apenas envia os .xlsx já gerados em ./output/
+   # Apenas envia os .xlsx/.csv já gerados em ./output/
    python main.py --upload
    ```
    O destino padrão vem de `.env` (`AZE_UPLOAD_TARGET`, `AZE_STORAGE_ACCOUNT` e,
@@ -143,7 +156,7 @@ Conceda a ela:
 | Escopo | Papel | Para quê |
 |---|---|---|
 | Management Group / assinaturas-alvo | **Reader** | ler o inventário via Resource Graph |
-| Storage Account de destino | **Storage Blob Data Contributor** | gravar os `.xlsx` no container de blob |
+| Storage Account de destino | **Storage Blob Data Contributor** | gravar os `.xlsx`/`.csv` no container de blob |
 
 ```powershell
 az role assignment create --assignee $principal --role "Reader" `
@@ -189,10 +202,11 @@ AZE_BLOB_PREFIX=azure-estate
 .\scripts\Run-AzureEstate.ps1 -Report resource_details -UploadTarget blob
 ```
 
-O script grava em `output\<data>-<hora>\`, envia os `.xlsx` ao destino escolhido
-e registra tudo em `logs\azure-estate_<data>.log`. Ele retorna código diferente
-de zero se o Python falhar **ou** se nenhum `.xlsx` for gerado — sem isso a
-tarefa apareceria como bem-sucedida para sempre.
+O script grava em `output\<data>-<hora>\`, envia os `.xlsx`/`.csv` ao destino
+escolhido e registra tudo em `logs\azure-estate_<data>.log`. Ele retorna código
+diferente de zero se o Python falhar **ou** se nenhum arquivo for gerado — sem
+isso a tarefa apareceria como bem-sucedida para sempre. Use `-Format csv` (ou
+`xlsx`) para restringir o formato.
 
 ### 4. Registrar a Tarefa Agendada
 
@@ -221,8 +235,9 @@ azure_estate/
   auth.py              # autenticação Azure (CLI, identidade gerenciada, default)
   config.py            # configuração (tenant, identidade, destino de upload)
   collectors/          # coleta via Resource Graph
-  exporters/           # exportação: Excel + upload para Azure Storage
+  exporters/           # exportação: Excel/CSV + upload para Azure Storage
     excel.py           #   geração dos .xlsx (com gráficos)
+    csv_exporter.py    #   geração dos .csv (um arquivo por tabela)
     blob.py            #   envio para container de Blob (Entra ID)
     file_share.py      #   envio para Azure File Share (OAuth ou chave)
   reports/             # relatórios registrados

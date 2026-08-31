@@ -76,10 +76,23 @@ checa(
 )
 checa("\\" not in enviados[0], "nenhuma barra invertida no nome do blob")
 
-print("4. so .xlsx e enviado")
+print("4. so .xlsx e .csv sao enviados")
 up, duble = _uploader()
-enviados = up.upload_directory(_pasta(["a.xlsx", "b.txt", "c.log", "d.xlsx"]))
-checa(sorted(enviados) == ["a.xlsx", "d.xlsx"], f"filtro *.xlsx (obtido {enviados})")
+enviados = up.upload_directory(_pasta(["a.xlsx", "b.txt", "c.log", "d.xlsx", "e.csv"]))
+checa(
+    sorted(enviados) == ["a.xlsx", "d.xlsx", "e.csv"],
+    f"filtro *.xlsx + *.csv (obtido {enviados})",
+)
+
+print("4b. padrao pode ser restringido (string unica ainda aceita)")
+up, duble = _uploader()
+enviados = up.upload_directory(_pasta(["a.xlsx", "e.csv"]), "*.csv")
+checa(enviados == ["e.csv"], f"apenas *.csv (obtido {enviados})")
+
+print("4c. padroes sobrepostos nao duplicam o envio")
+up, duble = _uploader()
+enviados = up.upload_directory(_pasta(["a.csv"]), ("*.csv", "*.csv", "*"))
+checa(enviados == ["a.csv"], f"cada arquivo enviado uma vez (obtido {enviados})")
 
 print("5. pasta vazia e pasta inexistente")
 up, duble = _uploader()

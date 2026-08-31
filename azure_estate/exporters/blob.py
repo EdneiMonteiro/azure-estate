@@ -91,10 +91,15 @@ class BlobUploader:
         return uploaded
 
     def upload_directory(
-        self, local_dir: str | pathlib.Path, pattern: str = "*.xlsx"
+        self,
+        local_dir: str | pathlib.Path,
+        patterns: str | Iterable[str] = ("*.xlsx", "*.csv"),
     ) -> list[str]:
-        """Upload every file matching *pattern* in *local_dir* (non-recursive)."""
+        """Upload every file matching *patterns* in *local_dir* (non-recursive)."""
         local_path = pathlib.Path(local_dir)
         if not local_path.is_dir():
             return []
-        return self.upload_files(sorted(local_path.glob(pattern)))
+        if isinstance(patterns, str):
+            patterns = (patterns,)
+        matched = {p for pattern in patterns for p in local_path.glob(pattern)}
+        return self.upload_files(sorted(matched))

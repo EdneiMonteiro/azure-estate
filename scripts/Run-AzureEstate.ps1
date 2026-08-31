@@ -11,7 +11,7 @@
     Cada execução:
       1. gera o relatório em uma subpasta datada (execuções concorrentes ou
          interrompidas não se sobrepõem);
-      2. envia os .xlsx para o File Share;
+      2. envia os .xlsx e .csv para o File Share;
       3. registra tudo em logs\azure-estate_<data>.log;
       4. remove execuções locais mais antigas que -RetentionDays.
 
@@ -25,6 +25,10 @@
     Destino do envio: 'blob' (container de Blob Storage) ou 'share' (Azure File
     Share). Padrao: o valor de AZE_UPLOAD_TARGET no .env.
 
+.PARAMETER Format
+    Formato de saida: 'xlsx', 'csv' ou 'both'. Padrao: o valor de
+    AZE_OUTPUT_FORMAT no .env (que por sua vez tem 'both' como padrao).
+
 .EXAMPLE
     .\scripts\Run-AzureEstate.ps1 -Report resource_details -UploadTarget blob
 #>
@@ -35,7 +39,9 @@ param(
     [int]    $RetentionDays = 30,
     [switch] $SkipUpload,
     [ValidateSet("blob","share")]
-    [string] $UploadTarget
+    [string] $UploadTarget,
+    [ValidateSet("xlsx","csv","both")]
+    [string] $Format
 )
 
 Set-StrictMode -Version Latest
@@ -73,6 +79,7 @@ Write-Log "=== Inicio | relatorio='$Report' | auth='$($env:AZE_AUTH_MODE)' | sai
 $exitCode = 0
 try {
     $arguments = @("main.py", "--report", $Report, "--output", $runDir)
+    if ($Format) { $arguments += @("--format", $Format) }
     if (-not $SkipUpload) {
         $arguments += "--upload"
         if ($UploadTarget) { $arguments += @("--upload-target", $UploadTarget) }
@@ -113,11 +120,12 @@ try {
         Write-Log "[ERRO] main.py terminou com codigo $exitCode."
     }
     else {
-        $files = @(Get-ChildItem -LiteralPath $runDir -Filter *.xlsx -File -ErrorAction SilentlyContinue)
+        $files = @(Get-ChildItem -LiteralPath $runDir -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Extension -in @(".xlsx", ".csv") })
         # Codigo de saida 0 sem nenhum arquivo e uma falha silenciosa: a tarefa
         # apareceria como bem-sucedida no agendador para sempre.
         if ($files.Count -eq 0) {
-            Write-Log "[ERRO] Nenhum .xlsx foi gerado em '$runDir'."
+            Write-Log "[ERRO] Nenhum .xlsx/.csv foi gerado em '$runDir'."
             $exitCode = 2
         }
         else {

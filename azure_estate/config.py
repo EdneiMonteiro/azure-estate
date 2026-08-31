@@ -71,3 +71,11 @@ UPLOAD_AUTH_MODE = _env("AZE_UPLOAD_AUTH_MODE", "login")
 # ---------------------------------------------------------------------------
 AUTH_MODE = _env("AZE_AUTH_MODE", "cli").strip().lower()
 CLIENT_ID = _env("AZE_CLIENT_ID", "")
+
+# ---------------------------------------------------------------------------
+# Output format: "xlsx", "csv" or "both" (default). CSV_DELIMITER matters for
+# Excel in locales that use the comma as decimal separator (pt-BR): there the
+# expected field separator is ";".
+# ---------------------------------------------------------------------------
+OUTPUT_FORMAT = _env("AZE_OUTPUT_FORMAT", "both").strip().lower()
+CSV_DELIMITER = _env("AZE_CSV_DELIMITER", ",") or ","
