@@ -109,6 +109,11 @@ Leia também:
    `resource_groups_21_08_2026_19_45_20.xlsx`. O carimbo é calculado uma única
    vez por execução, então todos os arquivos de uma mesma rodada compartilham o
    mesmo sufixo.
+
+   Como o carimbo tem segundos, **cada execução gera um conjunto novo**: rodar
+   duas vezes no mesmo dia não sobrescreve nada, e o diretório de saída acumula
+   o histórico. Se isso não for desejado, use `--output` com uma pasta por
+   execução (é o que o `Run-AzureEstate.ps1` faz) ou limpe a pasta antes.
 5. (Opcional) Envie os relatórios para o Azure Storage. O destino pode ser um
    **container de Blob** ou um **Azure File Share**, por padrão com identidade
    Microsoft Entra (sem chaves de conta):
@@ -123,6 +128,12 @@ Leia também:
    # Apenas envia os .xlsx/.csv já gerados em ./output/
    python main.py --upload
    ```
+   O escopo do envio depende de como o comando é invocado: junto com
+   `--report`, sobem apenas os arquivos **daquela execução** (identificados
+   pelo carimbo), para que um diretório de saída compartilhado não reenvie
+   todo o histórico a cada rodada. Sozinho, `--upload` envia tudo que houver
+   na pasta — esse é o propósito dele.
+
    O destino padrão vem de `.env` (`AZE_UPLOAD_TARGET`, `AZE_STORAGE_ACCOUNT` e,
    conforme o caso, `AZE_BLOB_CONTAINER`/`AZE_BLOB_PREFIX` ou `AZE_FILE_SHARE`/
    `AZE_SHARE_PATH`).
@@ -158,7 +169,7 @@ Sem `--report` e sem `--upload`, o `main.py` apenas imprime a ajuda.
 | `--output DIR` | `./output/` | Diretório onde os arquivos são gravados |
 | `--format {xlsx,csv,both}` | `AZE_OUTPUT_FORMAT` ou `both` | Formato de saída |
 | `--csv-delimiter CHAR` | `AZE_CSV_DELIMITER` ou `,` | Separador de campos do CSV |
-| `--upload` | — | Envia os `.xlsx`/`.csv` do diretório de saída ao Storage |
+| `--upload` | — | Envia os `.xlsx`/`.csv` do diretório de saída ao Storage; com `--report`, só os desta execução |
 | `--upload-target {blob,share}` | `AZE_UPLOAD_TARGET` ou `share` | Destino do envio |
 | `--storage-account NAME` | `AZE_STORAGE_ACCOUNT` | Conta de armazenamento |
 | `--container NAME` | `AZE_BLOB_CONTAINER` | Container (destino `blob`) |

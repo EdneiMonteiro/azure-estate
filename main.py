@@ -23,8 +23,26 @@ from __future__ import annotations
 import argparse
 import sys
 
+from azure_estate.naming import run_stamp
 from azure_estate.reports import REPORT_REGISTRY
 from azure_estate.reports.base import FORMATS
+
+
+def _upload_patterns(args: argparse.Namespace) -> tuple[str, ...]:
+    """Decide which files in the output directory are sent.
+
+    ``--report`` together with ``--upload`` means "send what this run
+    produced": every file name carries this run's stamp, and the output
+    directory is shared, so it usually also holds older runs — which would
+    otherwise be re-uploaded, in full, on every execution.
+
+    A bare ``--upload`` still sweeps the whole directory: sending files
+    generated earlier is precisely its purpose.
+    """
+    if not args.report:
+        return ("*.xlsx", "*.csv")
+    stamp = run_stamp()
+    return (f"*_{stamp}.xlsx", f"*_{stamp}.csv")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -185,7 +203,7 @@ def _upload_to_blob(args: argparse.Namespace, account: str) -> int:
         f"{uploader.target_uri} …"
     )
     try:
-        uploaded = uploader.upload_directory(args.output)
+        uploaded = uploader.upload_directory(args.output, _upload_patterns(args))
     except ClientAuthenticationError as exc:
         print(f"[ERROR] Authentication failed: {exc}")
         print(
@@ -205,8 +223,8 @@ def _upload_to_blob(args: argparse.Namespace, account: str) -> int:
 
     if not uploaded:
         print(
-            f"[AzEstate] No .xlsx/.csv files found in '{args.output}'. "
-            "Nothing uploaded."
+            f"[AzEstate] No .xlsx/.csv files found in '{args.output}'"
+            f"{' for this run' if args.report else ''}. Nothing uploaded."
         )
         return 0
 
@@ -291,7 +309,7 @@ def _upload_reports(args: argparse.Namespace) -> int:
         f"(auth-mode: {auth_mode}) …"
     )
     try:
-        uploaded = uploader.upload_directory(args.output)
+        uploaded = uploader.upload_directory(args.output, _upload_patterns(args))
     except ClientAuthenticationError as exc:
         print(f"[ERROR] Authentication failed: {exc}")
         if auth_mode == "login":
@@ -325,8 +343,8 @@ def _upload_reports(args: argparse.Namespace) -> int:
 
     if not uploaded:
         print(
-            f"[AzEstate] No .xlsx/.csv files found in '{args.output}'. "
-            "Nothing uploaded."
+            f"[AzEstate] No .xlsx/.csv files found in '{args.output}'"
+            f"{' for this run' if args.report else ''}. Nothing uploaded."
         )
         return 0
 

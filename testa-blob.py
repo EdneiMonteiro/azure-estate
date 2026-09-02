@@ -2,11 +2,12 @@
 
 O cliente de blob e substituido por um duble que apenas registra as chamadas.
 O que precisa ser provado aqui e a logica local: nome do blob, prefixo,
-normalizacao de separadores, filtro de arquivos e sobrescrita — o transporte em
-si e responsabilidade do SDK.
+normalizacao de separadores, filtro de arquivos, escopo do envio e sobrescrita
+— o transporte em si e responsabilidade do SDK.
 """
 from __future__ import annotations
 
+import argparse
 import pathlib
 import sys
 import tempfile
@@ -14,6 +15,12 @@ import tempfile
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from azure_estate.exporters.blob import BlobUploader  # noqa: E402
+from azure_estate.naming import run_stamp  # noqa: E402
+from main import _upload_patterns  # noqa: E402
+
+
+def _Args(**kw) -> argparse.Namespace:
+    return argparse.Namespace(**kw)
 
 
 class _ContainerDuble:
@@ -99,6 +106,41 @@ up, duble = _uploader()
 checa(up.upload_directory(_pasta([])) == [], "pasta vazia devolve []")
 checa(up.upload_directory("C:/nao/existe/mesmo") == [], "pasta inexistente devolve []")
 checa(duble.chamadas == [], "nenhuma chamada de upload disparada")
+
+print("5b. --report + --upload envia so os arquivos desta execucao")
+# A pasta de saida e compartilhada: sem filtro, execucoes anteriores (inclusive
+# as do formato antigo de nome) seriam reenviadas inteiras a cada rodada.
+STAMP = run_stamp()
+ANTIGOS = [
+    "resource_details_NSGs_20260831.csv",
+    "resource_details_NSGs_01_09_2026_08_00_00.csv",
+    "subscriptions_20260831.xlsx",
+]
+ATUAIS = [f"resource_details_NSGs_{STAMP}.csv", f"subscriptions_{STAMP}.xlsx"]
+
+up, duble = _uploader()
+enviados = up.upload_directory(
+    _pasta(ANTIGOS + ATUAIS), _upload_patterns(_Args(report="all"))
+)
+checa(sorted(enviados) == sorted(ATUAIS), f"so o carimbo atual (obtido {enviados})")
+checa(
+    not any(n.endswith("20260831.csv") or "01_09_2026" in n for n in enviados),
+    "nenhum arquivo de execucao anterior reenviado",
+)
+checa(
+    sorted(n for n, _, _ in duble.chamadas) == sorted(ATUAIS),
+    "os arquivos atuais foram de fato enviados (nao so filtrados)",
+)
+
+print("5c. --upload sozinho continua varrendo a pasta inteira")
+up, duble = _uploader()
+enviados = up.upload_directory(
+    _pasta(ANTIGOS + ATUAIS), _upload_patterns(_Args(report=None))
+)
+checa(
+    sorted(enviados) == sorted(ANTIGOS + ATUAIS),
+    f"todos os {len(ANTIGOS + ATUAIS)} arquivos enviados (obtido {len(enviados)})",
+)
 
 print("6. target_uri")
 up, _ = _uploader()
