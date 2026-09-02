@@ -114,6 +114,17 @@ Leia também:
    duas vezes no mesmo dia não sobrescreve nada, e o diretório de saída acumula
    o histórico. Se isso não for desejado, use `--output` com uma pasta por
    execução (é o que o `Run-AzureEstate.ps1` faz) ou limpe a pasta antes.
+
+   > Arquivos gerados **antes** dessa mudança usavam só a data (`_AAAAMMDD`) e
+   > nunca mais serão sobrescritos: eles convivem com os novos, com nomes
+   > diferentes e conteúdo equivalente. Para removê-los de uma vez:
+   > ```powershell
+   > .\scripts\Remove-LegacyOutput.ps1 -WhatIf   # lista o que seria apagado
+   > .\scripts\Remove-LegacyOutput.ps1           # apaga, pedindo confirmação
+   > ```
+   > O script só casa com o padrão antigo; os nomes novos não são tocados. Para
+   > os que já foram enviados ao Blob, o `.NOTES` do script traz o comando
+   > equivalente com `az storage blob delete-batch`.
 5. (Opcional) Envie os relatórios para o Azure Storage. O destino pode ser um
    **container de Blob** ou um **Azure File Share**, por padrão com identidade
    Microsoft Entra (sem chaves de conta):
@@ -331,6 +342,7 @@ azure_estate/
 scripts/
   Run-AzureEstate.ps1        # execução não assistida (gera, envia, registra log)
   Install-AzureEstateTask.ps1 # registra a Tarefa Agendada do Windows
+  Remove-LegacyOutput.ps1    # remove sobras da nomenclatura antiga (_AAAAMMDD)
 tools/
   generate_ari_configs.py    # regenera azure_estate/ari_specs.py a partir do ARI
 main.py                # CLI
