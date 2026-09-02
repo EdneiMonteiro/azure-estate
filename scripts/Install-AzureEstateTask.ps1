@@ -10,6 +10,25 @@
 
     Precisa ser executado em um PowerShell elevado (Administrador).
 
+.PARAMETER TaskName
+    Nome da Tarefa Agendada (padrao: AzureEstate-ResourceDetails). Registrar
+    com um nome ja existente sobrescreve a tarefa anterior.
+
+.PARAMETER At
+    Horario de execucao (padrao: 03:00).
+
+.PARAMETER Weekly
+    Dia da semana. Se omitido, a tarefa e diaria.
+
+.PARAMETER Report
+    Relatorio repassado ao Run-AzureEstate.ps1 (padrao: resource_details).
+
+.PARAMETER UploadTarget
+    Destino do envio repassado ao Run-AzureEstate.ps1: 'blob' ou 'share'.
+
+.PARAMETER User
+    Conta de execucao (padrao: SYSTEM, que alcanca o IMDS e nao expira senha).
+
 .EXAMPLE
     # Diariamente as 03:00
     .\scripts\Install-AzureEstateTask.ps1 -At 03:00

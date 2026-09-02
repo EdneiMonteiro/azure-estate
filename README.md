@@ -39,8 +39,17 @@ Leia também:
 ## O que este exemplo demonstra
 
 - Coleta de recursos via Azure Resource Graph (`azure_estate/collectors/`)
+- Enriquecimento com dados que o Resource Graph não fornece
+  (`azure_estate/enrich.py`): catálogo de SKUs de computação e cota restante
+  via ARM (`collectors/compute_skus.py`), IP privado/sub-rede/VNet/NSG e IP
+  público resolvidos pelas interfaces de rede (`collectors/network_map.py`) e
+  aposentadorias de serviço anunciadas no Advisor (`collectors/retirements.py`)
+- Seleção de colunas por tipo de recurso derivada do
+  [microsoft/ARI](https://github.com/microsoft/ARI) (`azure_estate/ari_specs.py`,
+  arquivo **gerado** — regenere com `python tools/generate_ari_configs.py`)
 - Autenticação com `azure-identity`: usuário logado no Azure CLI, identidade
-  gerenciada da VM ou `DefaultAzureCredential` (`azure_estate/auth.py`)
+  gerenciada da VM ou `DefaultAzureCredential` (`azure_estate/auth.py`), com
+  cache de token compartilhado entre threads
 - Exportação para Excel com `openpyxl`/`pandas` e para CSV com `pandas`
   (`azure_estate/exporters/`)
 - Envio dos relatórios para Azure Storage via Microsoft Entra ID: container de
@@ -82,6 +91,7 @@ Leia também:
    python main.py --list                 # lista relatórios disponíveis
    python main.py --report subscriptions # executa um relatório (saída em ./output/)
    python main.py --report all           # executa todos os relatórios de uma vez
+   python main.py --report all --output D:\inventario   # outro diretório de saída
    ```
    Por padrão cada relatório é gravado em **`.xlsx` e `.csv`**. Use `--format`
    para escolher apenas um deles (ou defina `AZE_OUTPUT_FORMAT` no `.env`):
@@ -92,10 +102,15 @@ Leia também:
    ```
    Um CSV guarda uma única tabela: o relatório `resource_details`, que é
    multi-abas, gera um arquivo por aba
-   (`resource_details_<aba>_<data>.csv`). O CSV é gravado em `utf-8-sig` —
+   (`resource_details_<aba>_<data-hora>.csv`). O CSV é gravado em `utf-8-sig` —
    sem o BOM, o Excel no Windows lê acentos como Latin-1 e os corrompe.
+
+   Todo arquivo é nomeado `<relatório>_DD_MM_AAAA_HH_MM_SS` — por exemplo
+   `resource_groups_21_08_2026_19_45_20.xlsx`. O carimbo é calculado uma única
+   vez por execução, então todos os arquivos de uma mesma rodada compartilham o
+   mesmo sufixo.
 5. (Opcional) Envie os relatórios para o Azure Storage. O destino pode ser um
-   **container de Blob** ou um **Azure File Share**, sempre com identidade
+   **container de Blob** ou um **Azure File Share**, por padrão com identidade
    Microsoft Entra (sem chaves de conta):
    ```bash
    # Blob container (recomendado para execução agendada)
@@ -131,6 +146,48 @@ Leia também:
    O destino **blob** não aceita `--auth-mode key`: ele usa sempre identidade
    Entra.
 6. Valide o comportamento antes de qualquer adaptação
+
+## Referência da CLI
+
+Sem `--report` e sem `--upload`, o `main.py` apenas imprime a ajuda.
+
+| Parâmetro | Padrão | Para quê |
+|---|---|---|
+| `--report NAME` | — | Relatório a executar, ou `all` para todos |
+| `--list` | — | Lista os relatórios registrados e sai |
+| `--output DIR` | `./output/` | Diretório onde os arquivos são gravados |
+| `--format {xlsx,csv,both}` | `AZE_OUTPUT_FORMAT` ou `both` | Formato de saída |
+| `--csv-delimiter CHAR` | `AZE_CSV_DELIMITER` ou `,` | Separador de campos do CSV |
+| `--upload` | — | Envia os `.xlsx`/`.csv` do diretório de saída ao Storage |
+| `--upload-target {blob,share}` | `AZE_UPLOAD_TARGET` ou `share` | Destino do envio |
+| `--storage-account NAME` | `AZE_STORAGE_ACCOUNT` | Conta de armazenamento |
+| `--container NAME` | `AZE_BLOB_CONTAINER` | Container (destino `blob`) |
+| `--blob-prefix PATH` | `AZE_BLOB_PREFIX` | Pasta virtual no container |
+| `--share NAME` | `AZE_FILE_SHARE` | File share (destino `share`) |
+| `--share-path PATH` | `AZE_SHARE_PATH` | Diretório dentro do share |
+| `--auth-mode {login,key}` | `AZE_UPLOAD_AUTH_MODE` ou `login` | Autenticação do upload; `key` só vale para `share` |
+| `--resource-group NAME` | `AZE_RESOURCE_GROUP` | RG da conta, usado por `--auth-mode key` |
+| `--subscription ID` | `AZE_SUBSCRIPTION` | Assinatura da conta, usada por `--auth-mode key` |
+
+Todas as variáveis estão documentadas em [`.env.example`](.env.example). Os
+nomes antigos com prefixo `ARI_` continuam aceitos por compatibilidade
+(`AZE_STORAGE_ACCOUNT` cai para `ARI_STORAGE_ACCOUNT` se a primeira não existir).
+A leitura do Azure é configurada por `AZURE_TENANT_ID`, `AZE_AUTH_MODE` e
+`AZE_CLIENT_ID`.
+
+## Testes
+
+Não há dependência de Azure: cada script substitui o serviço por um dublê ou
+por um servidor local e valida a lógica própria do projeto.
+
+```bash
+python testa-csv.py    # nome do arquivo, delimitador, encoding, roteamento de --format
+python testa-blob.py   # nome do blob, prefixo, filtro de arquivos, sobrescrita
+python testa-auth.py   # cache de token do CachingCredential sob concorrência
+python testa-arm.py    # retry do arm_get: 429/503, nextLink, recusa de repetir 403
+```
+
+Cada script sai com código diferente de zero se algum caso falhar.
 
 ## Execução recorrente no Windows com identidade gerenciada
 
@@ -205,8 +262,20 @@ AZE_BLOB_PREFIX=azure-estate
 O script grava em `output\<data>-<hora>\`, envia os `.xlsx`/`.csv` ao destino
 escolhido e registra tudo em `logs\azure-estate_<data>.log`. Ele retorna código
 diferente de zero se o Python falhar **ou** se nenhum arquivo for gerado — sem
-isso a tarefa apareceria como bem-sucedida para sempre. Use `-Format csv` (ou
-`xlsx`) para restringir o formato.
+isso a tarefa apareceria como bem-sucedida para sempre.
+
+| Parâmetro | Padrão | Para quê |
+|---|---|---|
+| `-Report` | `resource_details` | Relatório a executar (`all` roda todos) |
+| `-Format` | `AZE_OUTPUT_FORMAT` | `xlsx`, `csv` ou `both` |
+| `-UploadTarget` | `AZE_UPLOAD_TARGET` | `blob` ou `share` |
+| `-SkipUpload` | — | Gera os arquivos sem enviar ao Storage |
+| `-OutputRoot` | `<repo>\output` | Raiz onde a subpasta datada é criada |
+| `-RetentionDays` | `30` | Idade máxima das execuções e logs **locais**; o destino permanente é o Storage |
+
+> A subpasta por execução usa o carimbo `yyyyMMdd-HHmmss` — diferente do nome
+> dos arquivos (`DD_MM_AAAA_HH_MM_SS`) porque a limpeza por
+> `-RetentionDays` casa esse padrão para decidir o que apagar.
 
 ### 4. Registrar a Tarefa Agendada
 
@@ -222,6 +291,9 @@ Em um PowerShell **elevado**:
 
 A tarefa roda como **SYSTEM** com "executar mesmo sem usuário logado" (o IMDS é
 um endpoint de rede local, acessível ao SYSTEM) e nenhuma senha é armazenada.
+Use `-TaskName` para registrar mais de uma tarefa (o padrão é
+`AzureEstate-ResourceDetails`, e reexecutar sobrescreve a tarefa de mesmo nome)
+e `-User` para trocar a conta de execução.
 
 ```powershell
 Start-ScheduledTask   -TaskName "AzureEstate-ResourceDetails"   # testar agora
@@ -234,7 +306,11 @@ Get-ScheduledTaskInfo -TaskName "AzureEstate-ResourceDetails"   # último result
 azure_estate/
   auth.py              # autenticação Azure (CLI, identidade gerenciada, default)
   config.py            # configuração (tenant, identidade, destino de upload)
-  collectors/          # coleta via Resource Graph
+  naming.py            # carimbo DD_MM_AAAA_HH_MM_SS dos nomes de arquivo
+  enrich.py            # junta SKU/cota, rede e retirements a cada aba
+  resource_type_configs.py # tipos de recurso e colunas exportadas
+  ari_specs.py         # colunas derivadas do microsoft/ARI (GERADO)
+  collectors/          # coleta via Resource Graph, ARM, Advisor
   exporters/           # exportação: Excel/CSV + upload para Azure Storage
     excel.py           #   geração dos .xlsx (com gráficos)
     csv_exporter.py    #   geração dos .csv (um arquivo por tabela)
@@ -244,7 +320,10 @@ azure_estate/
 scripts/
   Run-AzureEstate.ps1        # execução não assistida (gera, envia, registra log)
   Install-AzureEstateTask.ps1 # registra a Tarefa Agendada do Windows
+tools/
+  generate_ari_configs.py    # regenera azure_estate/ari_specs.py a partir do ARI
 main.py                # CLI
+testa-*.py             # testes locais, sem Azure (veja "Testes")
 ```
 
 ## Suporte

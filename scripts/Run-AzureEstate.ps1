@@ -11,12 +11,21 @@
     Cada execução:
       1. gera o relatório em uma subpasta datada (execuções concorrentes ou
          interrompidas não se sobrepõem);
-      2. envia os .xlsx e .csv para o File Share;
+      2. envia os .xlsx e .csv ao destino escolhido (container de Blob ou File
+         Share, conforme -UploadTarget / AZE_UPLOAD_TARGET);
       3. registra tudo em logs\azure-estate_<data>.log;
       4. remove execuções locais mais antigas que -RetentionDays.
 
 .PARAMETER Report
     Nome do relatório (padrão: resource_details). 'all' roda todos.
+
+.PARAMETER OutputRoot
+    Raiz onde a subpasta datada de cada execução é criada (padrão: output\ na
+    raiz do repositório).
+
+.PARAMETER RetentionDays
+    Idade máxima, em dias, das execuções e logs LOCAIS (padrão: 30). O destino
+    permanente dos relatórios é o Storage Account.
 
 .PARAMETER SkipUpload
     Gera os arquivos sem enviar ao Storage Account.

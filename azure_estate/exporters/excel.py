@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import pathlib
-from datetime import date
 
 import pandas as pd
 from openpyxl.chart import PieChart, Reference
 from openpyxl.chart.label import DataLabelList
 from openpyxl.chart.series import DataPoint
+
+from azure_estate.naming import run_stamp
 
 # Excel refuses any cell longer than this; openpyxl would silently truncate it.
 _MAX_CELL = 32767
@@ -57,11 +58,10 @@ class ExcelExporter:
             Name of the Excel worksheet.
         filename:
             Base filename (without directory).  Defaults to
-            ``<sheet_name>_YYYYMMDD.xlsx``.
+            ``<sheet_name>_DD_MM_YYYY_HH_MM_SS.xlsx``.
         """
         if filename is None:
-            today = date.today().strftime("%Y%m%d")
-            filename = f"{sheet_name}_{today}.xlsx"
+            filename = f"{sheet_name}_{run_stamp()}.xlsx"
 
         path = self._output_dir / filename
 
@@ -135,8 +135,7 @@ class ExcelExporter:
             'Outros' to keep the chart readable.
         """
         if filename is None:
-            today = date.today().strftime("%Y%m%d")
-            filename = f"{sheet_name}_{today}.xlsx"
+            filename = f"{sheet_name}_{run_stamp()}.xlsx"
 
         path = self._output_dir / filename
 

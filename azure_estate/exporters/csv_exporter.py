@@ -1,7 +1,7 @@
 """Save reports as CSV files.
 
 One CSV per table: unlike a workbook, a CSV holds a single sheet, so a
-multi-sheet report becomes ``<prefix>_<table>_<YYYYMMDD>.csv``.
+multi-sheet report becomes ``<prefix>_<table>_<DD_MM_YYYY_HH_MM_SS>.csv``.
 
 The default encoding is ``utf-8-sig`` because Excel on Windows reads plain
 UTF-8 CSV as Latin-1 and mangles every accent.
@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import pathlib
 import re
-from datetime import date
 
 import pandas as pd
+
+from azure_estate.naming import run_stamp
 
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -52,11 +53,10 @@ class CsvExporter:
             Base name used when *filename* is omitted.
         filename:
             Explicit file name (without directory).  Defaults to
-            ``<name>_YYYYMMDD.csv``.
+            ``<name>_DD_MM_YYYY_HH_MM_SS.csv``.
         """
         if filename is None:
-            today = date.today().strftime("%Y%m%d")
-            filename = f"{_slug(name)}_{today}.csv"
+            filename = f"{_slug(name)}_{run_stamp()}.csv"
 
         path = self._output_dir / filename
         df.to_csv(
@@ -74,11 +74,11 @@ class CsvExporter:
         prefix: str,
     ) -> list[pathlib.Path]:
         """Write one CSV per table. Empty DataFrames are skipped."""
-        today = date.today().strftime("%Y%m%d")
+        stamp = run_stamp()
         paths: list[pathlib.Path] = []
         for table_name, df in tables:
             if df is None or df.empty:
                 continue
-            filename = f"{_slug(prefix)}_{_slug(table_name)}_{today}.csv"
+            filename = f"{_slug(prefix)}_{_slug(table_name)}_{stamp}.csv"
             paths.append(self.save(df, filename=filename))
         return paths

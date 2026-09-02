@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pathlib
-from datetime import date
 
 import pandas as pd
 
@@ -13,6 +12,7 @@ from azure_estate.config import TENANT_ID
 from azure_estate.enrich import Enricher
 from azure_estate.exporters.csv_exporter import CsvExporter
 from azure_estate.exporters.excel import ExcelExporter
+from azure_estate.naming import run_stamp
 from azure_estate.reports.base import BaseReport, wants_csv, wants_excel
 from azure_estate.resource_type_configs import RESOURCE_CONFIGS
 
@@ -94,13 +94,14 @@ class ResourceDetailReport(BaseReport):
             print("\n  No resources found across all configured types.")
             return
 
-        today = date.today().strftime("%Y%m%d")
         paths: list[pathlib.Path] = []
 
         if wants_excel(fmt):
             exporter = ExcelExporter(output_dir=output_dir)
             paths.append(
-                exporter.save_multi_sheet(sheets, f"resource_details_{today}.xlsx")
+                exporter.save_multi_sheet(
+                    sheets, f"resource_details_{run_stamp()}.xlsx"
+                )
             )
 
         if wants_csv(fmt):

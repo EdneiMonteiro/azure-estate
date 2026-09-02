@@ -6,18 +6,20 @@ arquivo, delimitador, encoding, um CSV por aba e o respeito ao --format.
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 import tempfile
-from datetime import date
+from datetime import date, datetime
 
 import pandas as pd
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from azure_estate.exporters.csv_exporter import CsvExporter  # noqa: E402
+from azure_estate.naming import run_stamp  # noqa: E402
 from azure_estate.reports.base import BaseReport  # noqa: E402
 
-HOJE = date.today().strftime("%Y%m%d")
+HOJE = run_stamp()
 
 falhas: list[str] = []
 
@@ -49,6 +51,15 @@ print("1. nome padrao e conteudo")
 pasta = _tmp()
 path = CsvExporter(pasta).save(DF, name="subscriptions")
 checa(path.name == f"subscriptions_{HOJE}.csv", f"nome do arquivo (obtido {path.name})")
+checa(
+    re.fullmatch(r"subscriptions_\d{2}_\d{2}_\d{4}_\d{2}_\d{2}_\d{2}\.csv", path.name)
+    is not None,
+    f"carimbo DD_MM_AAAA_HH_MM_SS (obtido {path.name})",
+)
+checa(
+    datetime.strptime(HOJE, "%d_%m_%Y_%H_%M_%S").date() == date.today(),
+    f"carimbo corresponde a data de hoje (obtido {HOJE})",
+)
 lido = pd.read_csv(path, encoding="utf-8-sig")
 checa(list(lido.columns) == ["Nome", "Qtd. Recursos"], "cabecalho preservado")
 checa(lido["Nome"].tolist() == DF["Nome"].tolist(), "acentos e virgulas preservados")
