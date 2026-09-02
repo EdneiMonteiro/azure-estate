@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import math
 import pathlib
+import re
 
 import pandas as pd
+from openpyxl import Workbook
 from openpyxl.chart import PieChart, Reference
 from openpyxl.chart.label import DataLabelList
 from openpyxl.chart.series import DataPoint
+from openpyxl.utils import get_column_letter
 
 from azure_estate.naming import run_stamp
 
@@ -13,12 +17,86 @@ from azure_estate.naming import run_stamp
 _MAX_CELL = 32767
 _ELLIPSIS = "… (truncado)"
 
+# Caracteres de controle que o Excel recusa; openpyxl levanta
+# IllegalCharacterError e derruba a geração inteira por causa de uma célula.
+_ILEGAIS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+# Quantas linhas bastam para estimar a largura de uma coluna.  Varrer as
+# 39 mil linhas de uma aba grande custa tempo e não muda o resultado, já que a
+# largura é limitada a 80 caracteres.
+_AMOSTRA_LARGURA = 200
+_LARGURA_MAX = 80
+
+
+def _limpa(valor):
+    """Devolve *valor* aceitável para uma célula do Excel."""
+    if valor is None:
+        return None
+    if isinstance(valor, float) and math.isnan(valor):
+        return None
+    if isinstance(valor, (int, float, bool)):
+        return valor
+    texto = valor if isinstance(valor, str) else str(valor)
+    if _ILEGAIS.search(texto):
+        texto = _ILEGAIS.sub("", texto)
+    if len(texto) > _MAX_CELL:
+        texto = texto[: _MAX_CELL - len(_ELLIPSIS)] + _ELLIPSIS
+    return texto
+
+
+def _larguras(df: pd.DataFrame) -> list[float]:
+    """Largura de cada coluna, estimada a partir do cabeçalho e de uma amostra."""
+    amostra = df.head(_AMOSTRA_LARGURA)
+    larguras = []
+    for coluna in df.columns:
+        maior = len(str(coluna))
+        for valor in amostra[coluna]:
+            if valor is None:
+                continue
+            tamanho = len(str(valor))
+            if tamanho > maior:
+                maior = tamanho
+                if maior >= _LARGURA_MAX:
+                    break
+        larguras.append(min(maior + 4, _LARGURA_MAX))
+    return larguras
+
+
+def _escreve_aba(worksheet, df: pd.DataFrame) -> None:
+    """Escreve *df* numa planilha em modo write-only, linha a linha.
+
+    O modo write-only não guarda as células escritas, então o pico de memória
+    passa a ser o de uma linha e não o do livro inteiro.
+    """
+    for indice, largura in enumerate(_larguras(df), start=1):
+        worksheet.column_dimensions[get_column_letter(indice)].width = largura
+
+    worksheet.append([str(c) for c in df.columns])
+    for linha in df.itertuples(index=False, name=None):
+        worksheet.append([_limpa(valor) for valor in linha])
+
+
+def _sanitiza(df: pd.DataFrame) -> pd.DataFrame:
+    """Aplica ``_limpa`` às colunas de texto de *df*.
+
+    Usado no caminho com gráfico, que precisa do modo normal do openpyxl e por
+    isso não passa por ``_escreve_aba``.
+    """
+    out = df.copy()
+    for coluna in out.columns:
+        if pd.api.types.is_numeric_dtype(out[coluna]) or pd.api.types.is_bool_dtype(
+            out[coluna]
+        ):
+            continue
+        out[coluna] = out[coluna].map(_limpa)
+    return out
+
 
 def _clip_cells(df: pd.DataFrame) -> pd.DataFrame:
     """Shorten oversized text cells, flagging that content was cut.
 
-    Flattened arrays (a firewall's address list, a cluster's labels) can run to
-    hundreds of thousands of characters.
+    Mantido para quem já dependia da função; o caminho de escrita agora corta
+    célula a célula em ``_limpa``, sem copiar o DataFrame.
     """
     out = df.copy()
     for column in out.columns:
@@ -65,9 +143,12 @@ class ExcelExporter:
 
         path = self._output_dir / filename
 
-        with pd.ExcelWriter(path, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name=sheet_name[:31])
-            self._auto_fit(writer.sheets[sheet_name[:31]])
+        workbook = Workbook(write_only=True)
+        try:
+            _escreve_aba(workbook.create_sheet(title=sheet_name[:31]), df)
+            workbook.save(path)
+        finally:
+            workbook.close()
 
         return path
 
@@ -80,7 +161,7 @@ class ExcelExporter:
                 for cell in col_cells
             )
             worksheet.column_dimensions[col_cells[0].column_letter].width = (
-                min(max_len + 4, 80)
+                min(max_len + 4, _LARGURA_MAX)
             )
 
     def save_multi_sheet(
@@ -99,13 +180,15 @@ class ExcelExporter:
         """
         path = self._output_dir / filename
 
-        with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        workbook = Workbook(write_only=True)
+        try:
             for sheet_name, df in sheets:
                 if df is None or df.empty:
                     continue
-                safe_name = sheet_name[:31]
-                _clip_cells(df).to_excel(writer, index=False, sheet_name=safe_name)
-                self._auto_fit(writer.sheets[safe_name])
+                _escreve_aba(workbook.create_sheet(title=sheet_name[:31]), df)
+            workbook.save(path)
+        finally:
+            workbook.close()
 
         return path
 
@@ -149,7 +232,7 @@ class ExcelExporter:
 
         with pd.ExcelWriter(path, engine="openpyxl") as writer:
             # Sheet 1: full data
-            df.to_excel(writer, index=False, sheet_name=sheet_name[:31])
+            _sanitiza(df).to_excel(writer, index=False, sheet_name=sheet_name[:31])
             self._auto_fit(writer.sheets[sheet_name[:31]])
 
             # Sheet 2: chart source data (hidden helper sheet) + chart

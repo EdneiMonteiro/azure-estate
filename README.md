@@ -60,7 +60,11 @@ Leia também:
   gerenciada da VM ou `DefaultAzureCredential` (`azure_estate/auth.py`), com
   cache de token compartilhado entre threads
 - Exportação para Excel com `openpyxl`/`pandas` e para CSV com `pandas`
-  (`azure_estate/exporters/`)
+  (`azure_estate/exporters/`). O `.xlsx` é escrito em modo *write-only*: o pico
+  de memória acompanha a linha, não o livro inteiro — medido em 66 abas e
+  39.529 linhas, caiu de 243 MB para 2,4 MB, o que evita a falha de geração em
+  VMs pequenas. Caracteres de controle são removidos e células acima do limite
+  do Excel (32.767) são cortadas com a marca `… (truncado)`
 - Envio dos relatórios para Azure Storage via Microsoft Entra ID: container de
   Blob (`azure_estate/exporters/blob.py`) ou File Share — este último também
   aceita chave de conta obtida por ARM (`azure_estate/exporters/file_share.py`)
@@ -217,6 +221,7 @@ python testa-blob.py   # nome do blob, prefixo, filtro de arquivos, sobrescrita
 python testa-auth.py   # cache de token do CachingCredential sob concorrência
 python testa-arm.py    # retry do arm_get: 429/503, nextLink, recusa de repetir 403
 python testa-celulas.py   # normalização de células: sku vira nome, lista vira texto
+python testa-excel.py     # exportação .xlsx: conteúdo, caractere ilegal, pico de memória
 python testa-paralelo.py  # degradação para execução serial quando faltam threads
 ```
 
