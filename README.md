@@ -47,6 +47,15 @@ Leia também:
 - Seleção de colunas por tipo de recurso derivada do
   [microsoft/ARI](https://github.com/microsoft/ARI) (`azure_estate/ari_specs.py`,
   arquivo **gerado** — regenere com `python tools/generate_ari_configs.py`)
+- Normalização das células que o Resource Graph devolve como estrutura
+  (`azure_estate/cell_format.py`): `sku` vira `premium` em vez de
+  `{"name":"premium"}`, `zones` vira `1; 2; 3` em vez de `["1","2","3"]` e
+  objeto com `tier`/`family` ganha o qualificador entre parênteses
+  (`Standard_B2s (Burstable)`). Escalares passam intactos
+- Degradação de paralelismo (`azure_estate/parallel.py`): se o sistema recusar
+  novas threads (`RuntimeError: can't start new thread`, comum em VM com pouca
+  memória livre), o enriquecimento reduz os workers e, no limite, roda serial —
+  mais lento, porém completo, e sempre com aviso na saída
 - Autenticação com `azure-identity`: usuário logado no Azure CLI, identidade
   gerenciada da VM ou `DefaultAzureCredential` (`azure_estate/auth.py`), com
   cache de token compartilhado entre threads
@@ -207,6 +216,8 @@ python testa-csv.py    # nome do arquivo, delimitador, encoding, roteamento de -
 python testa-blob.py   # nome do blob, prefixo, filtro de arquivos, sobrescrita
 python testa-auth.py   # cache de token do CachingCredential sob concorrência
 python testa-arm.py    # retry do arm_get: 429/503, nextLink, recusa de repetir 403
+python testa-celulas.py   # normalização de células: sku vira nome, lista vira texto
+python testa-paralelo.py  # degradação para execução serial quando faltam threads
 ```
 
 Cada script sai com código diferente de zero se algum caso falhar.
@@ -329,6 +340,8 @@ azure_estate/
   auth.py              # autenticação Azure (CLI, identidade gerenciada, default)
   config.py            # configuração (tenant, identidade, destino de upload)
   naming.py            # carimbo DD_MM_AAAA_HH_MM_SS dos nomes de arquivo
+  cell_format.py       # normaliza células que vêm como objeto/lista do Graph
+  parallel.py          # paralelismo que degrada para serial se faltar thread
   enrich.py            # junta SKU/cota, rede e retirements a cada aba
   resource_type_configs.py # tipos de recurso e colunas exportadas
   ari_specs.py         # colunas derivadas do microsoft/ARI (GERADO)

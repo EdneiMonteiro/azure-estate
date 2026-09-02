@@ -318,6 +318,8 @@ _COSMOS = ResourceTypeConfig(
     sheet_name="Cosmos DB",
     columns=[
         ("API",              "tostring(kind)"),
+        ("Offer Type",       "tostring(properties.databaseAccountOfferType)"),
+        ("Limite de Throughput (RU/s)", "tostring(properties.capacity.totalThroughputLimit)"),
         ("Consistência",     "tostring(properties.consistencyPolicy.defaultConsistencyLevel)"),
         ("Qtd. Regiões",     "tostring(array_length(properties.locations))"),
         ("Multi-Write",      "tostring(properties.enableMultipleWriteLocations)"),

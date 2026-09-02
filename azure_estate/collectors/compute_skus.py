@@ -7,12 +7,12 @@ behind it.  ARI resolves vCPUs, memory, disk and network limits from the
 """
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from azure.identity import AzureCliCredential
 
 from azure_estate.collectors._arm import arm_get
+from azure_estate.parallel import map_resiliente
 
 # ARI's per-size columns, mapped to the capability names the provider returns.
 SKU_COLUMNS: list[tuple[str, str]] = [
@@ -73,22 +73,21 @@ def fetch_sku_catalog(
 
     catalog: dict[tuple[str, str], dict[str, str]] = {}
     falhas: list[str] = []
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        for region, skus in pool.map(one, regions):
-            if not skus:
-                falhas.append(region)
-            for sku in skus:
-                if sku.get("resourceType") != "virtualMachines":
-                    continue
-                caps = _capabilities(sku)
-                row = {name: caps.get(key, "") for name, key in SKU_COLUMNS}
-                # The provider reports throughput in bytes/s; ARI reports MBps.
-                raw = row.get("Uncached Disk Throughput (MBps)")
-                if raw:
-                    row["Uncached Disk Throughput (MBps)"] = str(round(float(raw) / _MB))
-                row["VM Family"] = sku.get("family", "")
-                row["Zones Available in the Region"] = _zones(sku, region)
-                catalog[(region, str(sku.get("name", "")).lower())] = row
+    for region, skus in map_resiliente(one, regions, workers, "catálogo de SKUs"):
+        if not skus:
+            falhas.append(region)
+        for sku in skus:
+            if sku.get("resourceType") != "virtualMachines":
+                continue
+            caps = _capabilities(sku)
+            row = {name: caps.get(key, "") for name, key in SKU_COLUMNS}
+            # The provider reports throughput in bytes/s; ARI reports MBps.
+            raw = row.get("Uncached Disk Throughput (MBps)")
+            if raw:
+                row["Uncached Disk Throughput (MBps)"] = str(round(float(raw) / _MB))
+            row["VM Family"] = sku.get("family", "")
+            row["Zones Available in the Region"] = _zones(sku, region)
+            catalog[(region, str(sku.get("name", "")).lower())] = row
     if falhas:
         # Without this the SKU columns come back empty and look like a data gap
         # rather than a failed lookup.
@@ -125,15 +124,14 @@ def fetch_quota(
 
     quota: dict[tuple[str, str, str], str] = {}
     vazios = 0
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        for (sub, region), usages in pool.map(one, pairs):
-            if not usages:
-                vazios += 1
-            for usage in usages:
-                family = str(usage.get("name", {}).get("value", "")).lower()
-                limit, current = usage.get("limit"), usage.get("currentValue")
-                if family and limit is not None and current is not None:
-                    quota[(sub, region, family)] = str(limit - current)
+    for (sub, region), usages in map_resiliente(one, pairs, workers, "cotas de vCPU"):
+        if not usages:
+            vazios += 1
+        for usage in usages:
+            family = str(usage.get("name", {}).get("value", "")).lower()
+            limit, current = usage.get("limit"), usage.get("currentValue")
+            if family and limit is not None and current is not None:
+                quota[(sub, region, family)] = str(limit - current)
     if vazios:
         # Some subscriptions genuinely have no Compute provider registered, so
         # this is a warning, not an error — but a silent zero would hide a

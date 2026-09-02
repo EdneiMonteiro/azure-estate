@@ -6,6 +6,7 @@ import pandas as pd
 from azure.identity import AzureCliCredential
 from azure.mgmt.resourcegraph import ResourceGraphClient
 
+from azure_estate.cell_format import flatten_cell
 from azure_estate.collectors._graph import run_graph_query
 from azure_estate.resource_type_configs import ResourceTypeConfig
 
@@ -69,7 +70,7 @@ def _rename_row(row: dict[str, Any], config: ResourceTypeConfig) -> list[dict[st
         _SUB_ID:          row.get("subscriptionId", ""),
     }
     for i, (col_name, _) in enumerate(config.columns):
-        base[col_name] = row.get(f"_c{i}", "")
+        base[col_name] = flatten_cell(row.get(f"_c{i}", ""))
 
     if config.derive is None:
         return [base]
@@ -81,7 +82,9 @@ def _rename_row(row: dict[str, Any], config: ResourceTypeConfig) -> list[dict[st
     if not derived:
         derived = [{}]
 
-    return [{**base, **extra} for extra in derived]
+    return [
+        {**base, **{k: flatten_cell(v) for k, v in extra.items()}} for extra in derived
+    ]
 
 
 def query_resource_type(
